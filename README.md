@@ -1,4 +1,4 @@
-# Local RAG Chatbot
+# Code bot
 
 **Python:** 3.10.6  
 **pip:** 23.3.2
