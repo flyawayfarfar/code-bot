@@ -1,0 +1,17 @@
+.env
+chroma_db/
+venv/
+env/
+/app/__pycache__/*.pyc
+/.envLocal
+/app.zip
+/chroma_db_openai/chroma.sqlite3
+/chroma_db_openai/d18a1a3c-eba0-4b7e-aeae-bc04f0d71059/data_level0.bin
+/chroma_db_openai/d18a1a3c-eba0-4b7e-aeae-bc04f0d71059/header.bin
+/chroma_db_openai/d18a1a3c-eba0-4b7e-aeae-bc04f0d71059/length.bin
+/chroma_db_openai/d18a1a3c-eba0-4b7e-aeae-bc04f0d71059/link_lists.bin
+/data/journal_ing.txt
+/local-rag-ui/local-rag-ui.zip
+/localRagChatbot.zip
+/local_rag_chatbot_github.zip
+/readme.txt
