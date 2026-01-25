@@ -33,21 +33,29 @@ class SafeTextLoader(TextLoader):
 
 
 # Embeddings
-if settings.use_local_embeddings:
-    from langchain_community.embeddings import OllamaEmbeddings
-
-    def make_embedder():
-        return OllamaEmbeddings(
-            model=settings.ollama_embed_model,
-            base_url=settings.ollama_base_url,
+def make_embedder():
+    provider = settings.embedding_provider
+    if provider == "google":
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        if not settings.google_api_key:
+            raise RuntimeError("GOOGLE_API_KEY not set")
+        return GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004", 
+            google_api_key=settings.google_api_key
         )
-else:
-    from langchain_community.embeddings import OpenAIEmbeddings
-
-    def make_embedder():
+    
+    if provider == "openai":
+        from langchain_community.embeddings import OpenAIEmbeddings
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY not set")
         return OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
+
+    # Fallback to Ollama
+    from langchain_community.embeddings import OllamaEmbeddings
+    return OllamaEmbeddings(
+        model=settings.ollama_embed_model,
+        base_url=settings.ollama_base_url,
+    )
 
 
 def load_documents(data_dir: str) -> List[Document]:
@@ -116,11 +124,34 @@ def build_vector_store() -> Chroma:
     print(f"Loaded {len(docs)} docs -> {len(chunks)} chunks")
 
     embeddings = make_embedder()
-    vectordb = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
+    
+    vectordb = Chroma(
         persist_directory=settings.active_chroma_dir,
+        embedding_function=embeddings,
         collection_name="local-rag",
     )
+
+    # Batch processing to avoid Google API rate limits (especially free tier)
+    # Rate limit is often ~60 requests/min or lower for embeddings
+    # Using extremely conservative settings: 1 chunk at a time, 2s sleep
+    batch_size = 1
+    import time
+
+    print(f"Adding documents in batches of {batch_size}...")
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i : i + batch_size]
+        try:
+            vectordb.add_documents(batch)
+            print(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
+            # Sleep to be safe for free tier
+            if settings.embedding_provider == "google":
+                time.sleep(2.0)
+        except Exception as e:
+            print(f"Error processing batch {i}: {e}")
+            # simple retry with backoff
+            print("Retrying after 30s...")
+            time.sleep(30)
+            vectordb.add_documents(batch)
+
     vectordb.persist()
     return vectordb

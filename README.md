@@ -25,7 +25,7 @@
 
 3. **Setup Python environment**
    ```bash
-   cd C:\dev\github\local_rag_chatbot
+   cd C:\dev\github\code-bot
    python -m venv venv
    venv\Scripts\activate
    pip install -r requirements.txt
@@ -41,6 +41,11 @@
 5. **Build the index**
    ```bash
    python -m app.build_index
+   ```
+
+5a. **Verify the index (eg. for googleai)**
+   ```bash
+   python -c "import chromadb; client = chromadb.PersistentClient(path='chroma_googleai'); print('Collection count:', client.get_collection('local-rag').count())"
    ```
 
 6. **Run the server**
@@ -63,10 +68,17 @@
 
 9. **Use Web UI**
    ```bash
+   cd C:\dev\github\code-bot\local-rag-ui
    npm install
    npm run dev
    ```
    # Go to browser with this URL: http://localhost:5173/
+
+10. **Stop the app**
+   ```bash
+   taskkill /F /IM uvicorn.exe /T; taskkill /F /IM python.exe /T; Get-Process | Where-Object { $_.ProcessName -like "*node*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+   ```
+
 ---
 
 ## Switching Between Local Ollama and API

@@ -9,25 +9,30 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const IconSun = (props) => (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
     <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
   </svg>
 );
 const IconMoon = (props) => (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
   </svg>
 );
 const IconSend = (props) => (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="m22 2-7 20-4-9-9-4 20-7z"/>
+    <path d="m22 2-7 20-4-9-9-4 20-7z" />
   </svg>
 );
 
 export default function App() {
   const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
+  const [provider, setProvider] = useState("ollama");
   const [query, setQuery] = useState("");
   const [k, setK] = useState(3);
-  const [model, setModel] = useState("llama3.1:8b-instruct-q4_K_M"); // display only
+  const displayModel = useMemo(() => {
+    if (provider === "google") return "gemini-2.5-flash-lite";
+    if (provider === "openai") return "gpt-4o-mini";
+    return "llama3.1:8b";
+  }, [provider]);
   const [messages, setMessages] = useState([]); // {role, text, sources?}
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -54,7 +59,7 @@ export default function App() {
       const res = await fetch(`${apiBase}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, k }),
+        body: JSON.stringify({ query: q, k, provider }),
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = await res.json();
@@ -90,11 +95,11 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5">
               <span className="text-xs text-gray-500">k</span>
-              <input type="range" min={2} max={6} value={k} onChange={(e)=>setK(Number(e.target.value))} className="accent-blue-600" />
+              <input type="range" min={2} max={6} value={k} onChange={(e) => setK(Number(e.target.value))} className="accent-blue-600" />
               <span className="text-xs w-6 text-center">{k}</span>
             </div>
-            <button onClick={()=>setDark(d=>!d)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40 p-2 hover:shadow-sm">
-              {dark ? <IconSun/> : <IconMoon/>}
+            <button onClick={() => setDark(d => !d)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40 p-2 hover:shadow-sm">
+              {dark ? <IconSun /> : <IconMoon />}
             </button>
           </div>
         </div>
@@ -106,11 +111,20 @@ export default function App() {
         <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="col-span-2 flex items-center gap-2">
             <label className="text-xs text-gray-500 dark:text-gray-400">API</label>
-            <input className="w-full text-sm px-3 py-2 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none" value={apiBase} onChange={(e)=>setApiBase(e.target.value)} />
+            <input className="flex-1 text-sm px-3 py-2 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="text-sm px-3 py-2 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none"
+            >
+              <option value="ollama">Ollama</option>
+              <option value="openai">OpenAI</option>
+              <option value="google">Google</option>
+            </select>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 dark:text-gray-400">Model</span>
-            <span className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 truncate">{model}</span>
+            <span className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 truncate">{displayModel}</span>
           </div>
         </div>
 
@@ -132,13 +146,13 @@ export default function App() {
               <textarea
                 rows={2}
                 value={query}
-                onChange={(e)=>setQuery(e.target.value)}
+                onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder="Type your question and press Enter…"
                 className="flex-1 text-sm px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
               <button onClick={ask} disabled={!canAsk} className="h-11 px-5 rounded-xl bg-blue-600 text-white font-medium disabled:opacity-50 hover:shadow-sm flex items-center gap-2">
-                <IconSend/> Ask
+                <IconSend /> Ask
               </button>
             </div>
             {error && <div className="text-xs text-red-500 mt-2">{error}</div>}
@@ -154,7 +168,7 @@ export default function App() {
 function Message({ role, text, sources }) {
   const isUser = role === "user";
   return (
-    <div className={"flex " + (isUser ? "justify-end" : "justify-start") }>
+    <div className={"flex " + (isUser ? "justify-end" : "justify-start")}>
       <div className={(isUser ? "bg-gradient-to-br from-blue-600 to-indigo-600 text-white" : "bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-100 dark:border-gray-700") + " max-w-[80ch] rounded-2xl px-4 py-3 shadow-sm"}>
         <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{text}</div>
         {Array.isArray(sources) && sources.length > 0 && (
@@ -176,9 +190,9 @@ function TypingShimmer() {
     <div className="flex justify-start">
       <div className="max-w-[60ch] rounded-2xl px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
         <div className="animate-pulse space-y-2">
-          <div className="h-3 w-40 rounded bg-gray-200 dark:bg-gray-700"/>
-          <div className="h-3 w-64 rounded bg-gray-200 dark:bg-gray-700"/>
-          <div className="h-3 w-52 rounded bg-gray-200 dark:bg-gray-700"/>
+          <div className="h-3 w-40 rounded bg-gray-200 dark:bg-gray-700" />
+          <div className="h-3 w-64 rounded bg-gray-200 dark:bg-gray-700" />
+          <div className="h-3 w-52 rounded bg-gray-200 dark:bg-gray-700" />
         </div>
       </div>
     </div>
