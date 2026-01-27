@@ -31,76 +31,92 @@
    pip install -r requirements.txt
    ```
 
-4. **Sync the `requirements.txt` and uninstall unnecessary libraries**
+4. **Sync the `requirements.txt` (optional)**
    ```bash
-   pip install pip-tools   # if you haven’t already
+   pip install pip-tools
    pip-sync requirements.txt
    pip install -r requirements.txt
    ```
 
-5. **Build the index**
-   ```bash
+5. **Configure Environment**
+   Create a `.env` file (or edit `app/config.py` defaults).
+
+   **For Ollama (Default):**
+   ```env
+   EMBEDDING_PROVIDER=ollama
+   # OLLAMA_BASE_URL=http://localhost:11434 (default)
+   ```
+
+   **For OpenAI:**
+   ```env
+   EMBEDDING_PROVIDER=openai
+   OPENAI_API_KEY=sk-...
+   ```
+
+   **For Google AI:**
+   ```env
+   EMBEDDING_PROVIDER=google
+   GOOGLE_API_KEY=AIza...
+   ```
+
+6. **Build the index**
+   Run the build script. It will use the `EMBEDDING_PROVIDER` set in your environment.
+   
+   **Windows (PowerShell):**
+   ```powershell
+   $env:EMBEDDING_PROVIDER="ollama" # or "openai", "google"
    python -m app.build_index
    ```
 
-5a. **Verify the index (eg. for googleai)**
+   **Linux/Mac:**
    ```bash
+   export EMBEDDING_PROVIDER=ollama # or openai, google
+   python -m app.build_index
+   ```
+
+7. **Verify the index**
+   ```bash
+   # Example for Google AI index
    python -c "import chromadb; client = chromadb.PersistentClient(path='chroma_googleai'); print('Collection count:', client.get_collection('local-rag').count())"
    ```
 
-6. **Run the server**
+8. **Run the server**
    ```bash
    uvicorn app.main:app --reload
    ```
 
-7. **Test the health endpoint**
+9. **Test the health endpoint**
    ```bash
    curl http://127.0.0.1:8000/health
    # should get: {"status":"ok"}
    ```
 
-8. **Test chat**
-   ```bash
-   curl -X POST http://127.0.0.1:8000/chat      -H "Content-Type: application/json"      -d "{\"query\":\"What Project Alpha?\"}"
-   # Example:
-   # {"answer":"RAG stands for \"Retrieval-Augmented Generation\" and is a technique used in natural language processing to generate text responses based on retrieved information. It is often used in chatbots and other AI systems."}
-   ```
+10. **Test chat**
+    ```bash
+    curl -X POST http://127.0.0.1:8000/chat      -H "Content-Type: application/json"      -d "{\"query\":\"What Project Alpha?\"}"
+    ```
 
-9. **Use Web UI**
-   ```bash
-   cd C:\dev\github\code-bot\local-rag-ui
-   npm install
-   npm run dev
-   ```
-   # Go to browser with this URL: http://localhost:5173/
+11. **Use Web UI**
+    ```bash
+    cd C:\dev\github\code-bot\local-rag-ui
+    npm install
+    npm run dev
+    ```
+    # Go to browser with this URL: http://localhost:5173/
 
-10. **Stop the app**
-   ```bash
-   taskkill /F /IM uvicorn.exe /T; taskkill /F /IM python.exe /T; Get-Process | Where-Object { $_.ProcessName -like "*node*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-   ```
+12. **Stop the app**
+    ```powershell
+    taskkill /F /IM uvicorn.exe /T; taskkill /F /IM python.exe /T; Get-Process | Where-Object { $_.ProcessName -like "*node*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    ```
 
 ---
 
-## Switching Between Local Ollama and API
+## Switching Providers
 
-We use different database folders for local Ollama and API modes, so switching does not require re-indexing.
+The app supports multiple providers. You can switch between them by changing the `EMBEDDING_PROVIDER` environment variable (or in `.env`).  
+Each provider has its own ChromaDB persistence directory, so you must **build the index** for each provider you intend to use.
 
-1. Update `.env` and set:
-   ```env
-   USE_LOCAL_LLM=false
-   USE_LOCAL_EMBEDDINGS=false
-   ```
+- **Ollama**: `chroma_db_ollama`
+- **OpenAI**: `chroma_db_openai`
+- **Google**: `chroma_googleai`
 
-2. Build index based on mode:
-
-   **For Ollama index:**
-   ```bash
-   set USE_LOCAL_EMBEDDINGS=true
-   python -m app.build_index
-   ```
-
-   **For OpenAI index:**
-   ```bash
-   set USE_LOCAL_EMBEDDINGS=false
-   python -m app.build_index
-   ```
