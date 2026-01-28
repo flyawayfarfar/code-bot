@@ -1,5 +1,6 @@
 # app/main.py
 import os
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,6 +9,20 @@ from app.config import settings
 
 # Silence Chroma telemetry (recommended for on-prem)
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("server.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("code-bot")
+
+# Silence Chroma telemetry log noise
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -18,8 +33,9 @@ from langchain_core.runnables import (
 )
 
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OpenAIEmbeddings, HuggingFaceEmbeddings
-from langchain_community.chat_models import ChatOpenAI, ChatOllama
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_ollama import OllamaEmbeddings, ChatOllama
+from langchain_community.chat_models import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 app = FastAPI(title="Local RAG (OpenAI / Ollama + Chroma)")
@@ -66,21 +82,18 @@ class RetryEmbeddings:
                     raise e
         raise errors[-1]
 
-def get_embeddings():
+def get_embeddings(provider: str | None = None):
     """
     IMPORTANT: this MUST match how you built the index.
     """
-    provider = settings.embedding_provider
+    provider = provider or settings.embedding_provider
     try:
         if provider == "google":
-            print(f"DEBUG: Initializing google embeddings...")
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             base = GoogleGenerativeAIEmbeddings(
-                model="models/text-embedding-004", 
-                google_api_key=settings.google_api_key,
-                # api_version="v1" 
+                model="models/gemini-embedding-001", 
+                google_api_key=settings.google_api_key
             )
-            print(f"DEBUG: Google embeddings initialized.")
             return RetryEmbeddings(base, max_retries=5, delay=10)
     except Exception as e:
         print(f"DEBUG: ERROR in get_embeddings: {e}")
@@ -90,7 +103,10 @@ def get_embeddings():
         return OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
     
     # default to local/ollama
-    return HuggingFaceEmbeddings(model_name=settings.local_embedding_model)
+    return OllamaEmbeddings(
+        model=settings.ollama_embed_model,
+        base_url=settings.ollama_base_url
+    )
 
 
 def get_llm(provider: str = "ollama"):
@@ -121,10 +137,18 @@ def format_docs(docs):
 
 
 def make_chain(k_neighbors: int, provider: str = "ollama"):
-    embeddings = get_embeddings()
+    embeddings = get_embeddings(provider)
+
+    # Dynamically select persistent directory based on provider
+    if provider == "google":
+        persist_dir = settings.chroma_dir_google
+    elif provider == "openai":
+        persist_dir = settings.chroma_dir_openai
+    else:
+        persist_dir = settings.chroma_dir_local
 
     db = Chroma(
-        persist_directory=settings.active_chroma_dir,
+        persist_directory=persist_dir,
         embedding_function=embeddings,
         collection_name="local-rag",
     )
@@ -167,9 +191,16 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
 
 @app.on_event("startup")
-def startup():
-    # Pre-warm with default
-    app.state.chain = make_chain(settings.k_neighbors, "ollama")
+async def startup():
+    logger.info("Application starting up...")
+    try:
+        # Pre-warm with default
+        provider = settings.embedding_provider
+        app.state.chain = make_chain(settings.k_neighbors, provider)
+        logger.info(f"Application startup complete for provider: {provider}. Ready for requests.")
+    except Exception as e:
+        import traceback
+        logger.error(f"FATAL ERROR during startup: {e}\n{traceback.format_exc()}")
 
 
 @app.get("/health")
@@ -181,17 +212,9 @@ async def health():
 async def chat(req: ChatRequest):
     try:
         k = req.k or settings.k_neighbors
+        provider = req.provider or settings.embedding_provider
 
-        k = req.k or settings.k_neighbors
-        provider = req.provider or "ollama"
-
-        # If params match the cached chain's configuration (simplified check), use it.
-        # But here we have dynamic providers, so we might just rebuild the chain or cache by provider.
-        # For simplicity, let's just rebuild if it's not the default provider or if k changed.
-        # Ideally, we should cache chains by (k, provider).
-        
-        # Simple Logic: Always make chain for now to ensure provider switch works instantly 
-        # (Chroma retriever initialization is light usually, but optimal would be caching).
+        # Rebuild chain to ensure correct provider/k for this request
         chain = make_chain(k, provider)
         result = await chain.ainvoke(req.query)
 
@@ -204,4 +227,7 @@ async def chat(req: ChatRequest):
         return {"answer": result.get("answer", "").strip(), "sources": sources}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+        import traceback
+        error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
+        logger.error(f"CHAT ERROR: {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)

@@ -25,7 +25,7 @@ const IconSend = (props) => (
 
 export default function App() {
   const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
-  const [provider, setProvider] = useState("ollama");
+  const [provider, setProvider] = useState("google");
   const [query, setQuery] = useState("");
   const [k, setK] = useState(3);
   const displayModel = useMemo(() => {

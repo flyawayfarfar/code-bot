@@ -1,7 +1,43 @@
 # Local RAG Chatbot
 
-**Python:** 3.10.6  
-**pip:** 23.3.2
+![Banner](https://img.shields.io/badge/Status-Active-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.13.2-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-v0.111.0-red)
+
+## What is this?
+
+**Local RAG Chatbot** is a production-ready template for building Retrieval-Augmented Generation (RAG) applications. It allows users to chat with their own documents (PDFs, TXT, MD, CSV) entirely locally or by using popular cloud-based AI providers.
+
+The project is designed to be flexible, supporting multiple embedding and chat models, a persistent vector store, and a modern web-based UI.
+
+### Key Features
+
+- **Multi-Provider Support**: Seamlessly switch between **Ollama** (fully local), **OpenAI**, and **Google AI (Gemini)**.
+- **Robust Document Loading**: Intelligent loaders for PDF, Markdown, Text, and CSV files, with graceful error handling and encoding detection.
+- **Persistent Vector Store**: Uses **ChromaDB** to store document embeddings, with separate storage paths for each provider.
+- **Modern Web Interface**: A reactive frontend built with **React** and **Vite** for a sleek user experience.
+- **Production Ready**: Built with **FastAPI** for high performance and easy deployment.
+
+## Architecture Overview
+
+The system follows a classic RAG architecture:
+
+1.  **Ingestion**: Documents are loaded from the `data/` directory, chunked using `RecursiveCharacterTextSplitter`, and embedded using the selected provider.
+2.  **Storage**: Embeddings are stored in **ChromaDB**.
+3.  **Retrieval**: When a user asks a question, the system retrieves the most relevant document chunks.
+4.  **Generation**: The retrieved chunks are passed as context to a Language Model (LLM), which generates an answer based *only* on that context.
+
+```mermaid
+graph TD
+    A[User Query] --> B(FastAPI Server)
+    B --> C{Retrieval}
+    C --> D[ChromaDB]
+    D --> E[Relevant Chunks]
+    E --> F[Context + LLM]
+    F --> G[Generated Answer]
+    G --> B
+    B --> H[User Interface]
+```
 
 ---
 
@@ -86,14 +122,34 @@
    ```
 
 9. **Test the health endpoint**
-   ```bash
-   curl http://127.0.0.1:8000/health
-   # should get: {"status":"ok"}
-   ```
+    *(No UI required, just the FastAPI server running)*
+
+    **Linux/Mac/PowerShell:**
+    ```bash
+    curl http://127.0.0.1:8000/health
+    ```
+
+    **Windows (PowerShell Native):**
+    ```powershell
+    Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
+    ```
+    # expected output: {"status":"ok"}
 
 10. **Test chat**
+    
+    **Linux/Mac (or Git Bash):**
     ```bash
-    curl -X POST http://127.0.0.1:8000/chat      -H "Content-Type: application/json"      -d "{\"query\":\"What Project Alpha?\"}"
+    curl -X POST http://127.0.0.1:8000/chat \
+         -H "Content-Type: application/json" \
+         -d "{\"query\":\"What is Project Alpha?\"}"
+    ```
+
+    **Windows (PowerShell):**
+    ```powershell
+    Invoke-RestMethod -Uri "http://127.0.0.1:8000/chat" `
+                     -Method Post `
+                     -ContentType "application/json" `
+                     -Body '{"query": "What is Project Alpha?"}'
     ```
 
 11. **Use Web UI**

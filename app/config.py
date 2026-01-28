@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # use_local_embeddings:  bool = True           # DEPRECATED
     
     # "ollama", "openai", "google"
-    embedding_provider:    str  = "ollama"
+    embedding_provider:    str  = "google"
 
     # Data / Vector DB
     data_dir:              str  = "data"
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ollama_base_url:       str  = "http://localhost:11434"
     ollama_model:          str  = "llama3.1:8b"
     ollama_embed_model:    str  = "nomic-embed-text"   # good local embedder
+    local_embedding_model: str  = "nomic-embed-text"   # alias for older code
 
     # (optional) OpenAI fallback
     openai_api_key:        str | None = None
