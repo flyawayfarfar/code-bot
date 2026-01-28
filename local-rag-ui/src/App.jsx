@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 // ✨ Modern, centered, responsive chat UI (single-file React)
 // - Clean top nav, generous spacing, and a max-width container so it never hugs the edge
@@ -37,6 +38,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [dark, setDark] = useState(() => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [projects, setProjects] = useState([]);
+  const [randomProject, setRandomProject] = useState("");
 
   const scrollRef = useRef(null);
   useEffect(() => {
@@ -47,6 +50,18 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  useEffect(() => {
+    fetch(`${apiBase}/projects`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.projects && data.projects.length > 0) {
+          setProjects(data.projects);
+          setRandomProject(data.projects[Math.floor(Math.random() * data.projects.length)]);
+        }
+      })
+      .catch(err => console.error("Failed to fetch projects:", err));
+  }, [apiBase]);
+
   const canAsk = useMemo(() => query.trim().length > 0 && !loading, [query, loading]);
 
   async function ask() {
@@ -55,6 +70,7 @@ export default function App() {
     setError("");
     setLoading(true);
     setMessages((m) => [...m, { role: "user", text: q }]);
+    setQuery(""); // Clear immediately so user can type next question
     try {
       const res = await fetch(`${apiBase}/chat`, {
         method: "POST",
@@ -72,7 +88,6 @@ export default function App() {
       setMessages((m) => [...m, { role: "assistant", text: "Sorry, something went wrong. Check the API." }]);
     } finally {
       setLoading(false);
-      setQuery("");
     }
   }
 
@@ -132,7 +147,11 @@ export default function App() {
         <section className="rounded-2xl border border-gray-100 dark:border-gray-800 bg-white/90 dark:bg-gray-900/60 shadow-xl">
           <div ref={scrollRef} className="max-h-[62vh] overflow-auto p-6 space-y-5">
             {messages.length === 0 && (
-              <div className="text-sm text-gray-600 dark:text-gray-400">Ask about your docs. Try: <span className="font-medium text-gray-800 dark:text-gray-200">“What is Project Alpha?”</span></div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Ask about your code. Try: <span className="font-medium text-gray-800 dark:text-gray-200 cursor-pointer hover:underline" onClick={() => setQuery(`What are the REST endpoints in ${randomProject || "your projects"}?`)}>
+                  “What are the REST endpoints in {randomProject || "Project Alpha"}?”
+                </span>
+              </div>
             )}
             {messages.map((m, i) => (
               <Message key={i} role={m.role} text={m.text} sources={m.sources} />
@@ -170,14 +189,21 @@ function Message({ role, text, sources }) {
   return (
     <div className={"flex " + (isUser ? "justify-end" : "justify-start")}>
       <div className={(isUser ? "bg-gradient-to-br from-blue-600 to-indigo-600 text-white" : "bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-100 dark:border-gray-700") + " max-w-[80ch] rounded-2xl px-4 py-3 shadow-sm"}>
-        <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{text}</div>
+        <div className="text-[15px] leading-relaxed markdown-content">
+          <ReactMarkdown>{text}</ReactMarkdown>
+        </div>
         {Array.isArray(sources) && sources.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {sources.map((s, i) => (
-              <span key={i} title={s} className="text-xs px-2 py-1 rounded-full bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 truncate max-w-[22rem]">
-                {s}
-              </span>
-            ))}
+            {sources.map((s, i) => {
+              const parts = s.split(/[\\/]/);
+              const project = parts.length > 1 ? parts[0] : "global";
+              const filename = parts[parts.length - 1];
+              return (
+                <span key={i} title={s} className="text-xs px-2 py-1 rounded-full bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 truncate max-w-[22rem]">
+                  <span className="font-bold opacity-70">[{project}]</span> {filename}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>

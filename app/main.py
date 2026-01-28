@@ -118,7 +118,7 @@ def get_llm(provider: str = "ollama"):
             return ChatGoogleGenerativeAI(
                 model=settings.google_model,
                 google_api_key=settings.google_api_key,
-                temperature=0.1,
+                temperature=0.0,
                 convert_system_message_to_human=True
             )
     except Exception as e:
@@ -126,7 +126,7 @@ def get_llm(provider: str = "ollama"):
     if provider == "openai":
          if not settings.openai_api_key:
              raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
-         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.1)
+         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.0)
     
     # default to local/ollama
     return ChatOllama(model=getattr(settings, "ollama_model", "llama3.1:8b"))
@@ -155,11 +155,32 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     retriever = db.as_retriever(search_kwargs={"k": k_neighbors})
 
-    prompt = ChatPromptTemplate.from_template(
-        "You are a helpful assistant. Use ONLY the context below.\n\n"
-        "Context:\n{context}\n\n"
-        "Question:\n{question}\n\n"
-        "Answer:"
+    # Universal Code Intelligence System Prompt
+    system_prompt = (
+        "You are the 'Universal Code Intelligence Engine', a world-class AI specialized in deep code analysis, "
+        "architectural auditing, and cross-project reasoning. "
+        "Your mission is to provide precisely tailored insights to any stakeholder based on the provided codebase context."
+        "\n\n--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
+        "### ANALYTICAL PROTOCOL:\n"
+        "1. **Audience Detection & Adaption**:\n"
+        "   - **Architect**: Provide high-level structural patterns, coupling/cohesion analysis, security posture, and cross-service infrastructure impacts. focus on the 'Why' and the 'Big Picture'.\n"
+        "   - **Developer**: Focus on implementation details, API usage, library dependencies, refactoring opportunities, and code logic. Provide snippets and line-by-line explanations.\n"
+        "   - **Tester**: Identify REST endpoints, payload structures, validation logic, edge cases, and areas requiring unit or integration tests.\n"
+        "   - **Business/BA**: Distill technical complexity into functional value. Explain 'What this does' and 'How it affects the user' without technical jargon.\n"
+        "2. **Chain-of-Thought Reasoning**: For complex tasks (e.g., 'Is this secure?'), think step-by-step: \n"
+        "   a) Inventory relevant components (Controllers, Filters, Configs).\n"
+        "   b) Trace the data flow or logic sequence.\n"
+        "   c) Evaluate against industry best practices (OWASP for security, SOLID for design).\n"
+        "   d) Formulate the specific conclusion.\n"
+        "3. **Synthesized Cross-Referencing**: Never look at files in isolation. Connect Java logic to YAML/XML configs, and relate code to documentation (README/Markdown).\n"
+        "4. **Strict Grounding**: Only answer based on the CONTEXT. If the information is missing, describe what is present and exactly what is missing to provide a full answer (e.g., 'I see the auth controller but the bypass logic is not in the provided snippets').\n"
+        "5. **Formatting**: Use professional Markdown. Bold key terms. Use code blocks for all technical references. Always cite the source project and file (e.g., `[MyProject] ServiceImpl.java`)."
+    )
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "Question:\n{question}\n\nAnswer:"),
+        ]
     )
 
     llm = get_llm(provider)
@@ -206,6 +227,35 @@ async def startup():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/projects")
+async def get_projects():
+    """Returns a list of unique project names found in the vector store."""
+    try:
+        # We need an embedder just to initialize the Chroma object
+        # but we won't actually perform a search
+        embeddings = get_embeddings(settings.embedding_provider)
+        db = Chroma(
+            persist_directory=settings.active_chroma_dir,
+            embedding_function=embeddings,
+            collection_name="local-rag",
+        )
+        
+        # Get all metadatas to extract project names
+        # In a very large DB, this might be slow, but for hackathon scale it's fine.
+        results = db.get(include=['metadatas'])
+        projects = set()
+        if results and 'metadatas' in results:
+            for meta in results['metadatas']:
+                proj = meta.get('project')
+                if proj:
+                    projects.add(proj)
+        
+        return {"projects": sorted(list(projects))}
+    except Exception as e:
+        logger.error(f"Error fetching projects: {e}")
+        return {"projects": []}
 
 
 @app.post("/chat")

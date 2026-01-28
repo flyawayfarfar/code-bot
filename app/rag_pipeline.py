@@ -14,6 +14,22 @@ from langchain_community.document_loaders import (
     TextLoader,
 )
 
+import logging
+# Configure logger for indexing
+indexing_logger = logging.getLogger("indexing")
+indexing_logger.setLevel(logging.INFO)
+# Clear existing handlers
+if indexing_logger.handlers:
+    indexing_logger.handlers.clear()
+file_handler = logging.FileHandler("indexing.log", mode="w", encoding="utf-8")
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+file_handler.setFormatter(formatter)
+indexing_logger.addHandler(file_handler)
+# Also add console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+indexing_logger.addHandler(console_handler)
+
 
 class SafeTextLoader(TextLoader):
     """Text loader that tolerates encoding issues."""
@@ -59,99 +75,161 @@ def make_embedder():
 
 
 def load_documents(data_dir: str) -> List[Document]:
-    docs: List[Document] = []
+    """
+    Implements recursive project discovery. 
+    Immediate subdirectories of data_dir are treated as "Projects".
+    """
+    all_docs: List[Document] = []
+    
+    # Extensions to track
+    EXTENSIONS = {
+        ".java", ".xml", ".yml", ".yaml", ".properties", 
+        ".xsd", ".md", ".txt", ".config", "pom.xml"
+    }
+    
+    # Folders to ignore
+    FORBIDDEN_FOLDERS = {"target", ".git", ".idea", ".vscode", "bin", "build", "node_modules"}
 
-    # PDFs
-    try:
-        pdf_loader = DirectoryLoader(
-            data_dir,
-            glob="**/*.pdf",
-            loader_cls=PyPDFLoader,
-            recursive=True,
-        )
-        docs.extend(pdf_loader.load())
-    except Exception as exc:  # pragma: no cover - diagnostic path
-        print("PDF load error:", exc)
+    if not os.path.exists(data_dir):
+        print(f"Data directory {data_dir} does not exist.")
+        return []
 
-    # Plain text / markdown / csv as text
-    for pattern in ("**/*.txt", "**/*.md", "**/*.csv"):
-        try:
-            loader = DirectoryLoader(
-                data_dir,
-                glob=pattern,
-                loader_cls=SafeTextLoader,
-                recursive=True,
-            )
-            docs.extend(loader.load())
-        except Exception as exc:  # pragma: no cover - diagnostic path
-            print(f"Load error for {pattern}:", exc)
+    # Get immediate subdirectories as projects
+    projects = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+    
+    # If no subdirs, treat data_dir itself as a project named 'default'
+    if not projects:
+        projects = ["."]
 
-    # If no loaders matched, try the simplest fallback (files in root)
-    if not docs and os.path.isdir(data_dir):
-        for fname in os.listdir(data_dir):
-            fpath = os.path.join(data_dir, fname)
-            if os.path.isfile(fpath):
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="ignore") as handle:
-                        docs.append(
-                            Document(
-                                page_content=handle.read(),
-                                metadata={"source": fpath},
-                            )
-                        )
-                except Exception as exc:  # pragma: no cover - diagnostic path
-                    print("Fallback read error:", fpath, exc)
+    for project_name in projects:
+        project_path = os.path.join(data_dir, project_name)
+        display_name = project_name if project_name != "." else "default"
+        
+        indexing_logger.info(f"Indexing project: {display_name}...")
+        
+        for root, dirs, files in os.walk(project_path):
+            # Prune forbidden directories
+            dirs[:] = [d for d in dirs if d.lower() not in FORBIDDEN_FOLDERS]
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                ext = os.path.splitext(file)[1].lower()
+                
+                # Special case for pom.xml which has no extension but is important
+                is_pom = file.lower() == "pom.xml"
+                
+                if ext in EXTENSIONS or is_pom:
+                    try:
+                        # Use SafeTextLoader logic inline here for simplicity and control
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            if content.strip():
+                                all_docs.append(Document(
+                                    page_content=content,
+                                    metadata={
+                                        "source": os.path.relpath(file_path, data_dir),
+                                        "project": display_name,
+                                        "filename": file,
+                                        "extension": ext or "xml" # pom.xml has no ext
+                                    }
+                                ))
+                    except Exception as e:
+                        indexing_logger.error(f"Error loading {file_path}: {e}")
 
-    return docs
+    return all_docs
 
 
 def chunk_documents(docs: List[Document]) -> List[Document]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=900,
-        chunk_overlap=150,
-        separators=["\n\n", "\n", " ", ""],
+    from langchain_text_splitters import Language
+    
+    java_splitter = RecursiveCharacterTextSplitter.from_language(
+        language=Language.JAVA,
+        chunk_size=1200, # Code often needs slightly larger chunks for context
+        chunk_overlap=200,
     )
-    return splitter.split_documents(docs)
+    
+    default_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+    )
+
+    split_docs = []
+    for doc in docs:
+        if doc.metadata.get("extension") == ".java":
+            split_docs.extend(java_splitter.split_documents([doc]))
+        else:
+            split_docs.extend(default_splitter.split_documents([doc]))
+            
+    return split_docs
 
 
 def build_vector_store() -> Chroma:
     docs = load_documents(settings.data_dir)
     if not docs:
-        print("No documents found in", settings.data_dir)
+        indexing_logger.warning(f"No documents found in {settings.data_dir}")
         raise SystemExit(0)
-
-    chunks = chunk_documents(docs)
-    print(f"Loaded {len(docs)} docs -> {len(chunks)} chunks")
 
     embeddings = make_embedder()
     
+    # Initialize the vector store
     vectordb = Chroma(
         persist_directory=settings.active_chroma_dir,
         embedding_function=embeddings,
         collection_name="local-rag",
     )
 
-    # Batch processing to avoid Google API rate limits (especially free tier)
-    # Rate limit is often ~60 requests/min or lower for embeddings
-    # Using extremely conservative settings: 1 chunk at a time, 2s sleep
-    batch_size = 1
+    # --- INCREMENTAL INDEXING LOGIC ---
+    # Get all sources already in the DB to avoid re-embedding
+    try:
+        existing_data = vectordb.get()
+        existing_sources = set()
+        if existing_data and 'metadatas' in existing_data:
+            for meta in existing_data['metadatas']:
+                if 'source' in meta:
+                    existing_sources.add(meta['source'])
+        
+        indexing_logger.info(f"Found {len(existing_sources)} files already in database.")
+        
+        # Filter out docs that are already indexed
+        new_docs = [d for d in docs if d.metadata.get('source') not in existing_sources]
+        
+        if not new_docs:
+            indexing_logger.info("All files are already up to date. Nothing to index.")
+            return vectordb
+            
+        indexing_logger.info(f"Indexing {len(new_docs)} new/updated files...")
+        chunks = chunk_documents(new_docs)
+    except Exception as e:
+        indexing_logger.warning(f"Could not perform incremental check: {e}. Falling back to full indexing.")
+        chunks = chunk_documents(docs)
+
+    indexing_logger.info(f"Loaded documents -> {len(chunks)} chunks to process.")
+
+    # --- BATCHED PROCESSING ---
+    # Batch size of 50 stays safely under the 20,000 tokens-per-request limit
+    # 1100 chunks = 22 requests (well under the 1000 daily limit)
+    batch_size = 50
     import time
 
-    print(f"Adding documents in batches of {batch_size}...")
+    indexing_logger.info(f"Adding documents in batches of {batch_size} (saves quota)...")
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i : i + batch_size]
         try:
             vectordb.add_documents(batch)
-            print(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
-            # Sleep to be safe for free tier
+            indexing_logger.info(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
+            
+            # Google Free Tier (embedding-001) has a 30,000 Tokens Per Minute limit.
+            # 50 chunks * ~300 tokens = ~15,000 tokens. 
+            # Waiting 40s ensures we stay under the 30k TPM limit for the next batch.
             if settings.embedding_provider == "google":
-                time.sleep(2.0)
+                time.sleep(40.0) 
         except Exception as e:
-            print(f"Error processing batch {i}: {e}")
+            indexing_logger.error(f"Error processing batch {i}: {e}")
             # simple retry with backoff
-            print("Retrying after 30s...")
+            indexing_logger.info("Retrying in 30s...")
             time.sleep(30)
             vectordb.add_documents(batch)
 
     vectordb.persist()
+    indexing_logger.info("Indexing complete!")
     return vectordb
