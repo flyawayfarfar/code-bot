@@ -208,27 +208,44 @@ def build_vector_store() -> Chroma:
     # --- BATCHED PROCESSING ---
     # Batch size of 50 stays safely under the 20,000 tokens-per-request limit
     # 1100 chunks = 22 requests (well under the 1000 daily limit)
-    batch_size = 50
+    # To maximize the 1,000 daily requests (RPD), we use a larger batch size.
+    # 45 chunks stays safely under the 20,480 token per-request size limit.
+    batch_size = 45
     import time
 
-    indexing_logger.info(f"Adding documents in batches of {batch_size} (saves quota)...")
+    indexing_logger.info(f"Adding documents in batches of {batch_size} (saves daily quota)...")
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i : i + batch_size]
         try:
             vectordb.add_documents(batch)
             indexing_logger.info(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
             
-            # Google Free Tier (embedding-001) has a 30,000 Tokens Per Minute limit.
-            # 50 chunks * ~300 tokens = ~15,000 tokens. 
-            # Waiting 40s ensures we stay under the 30k TPM limit for the next batch.
             if settings.embedding_provider == "google":
-                time.sleep(40.0) 
+                # 30s delay ensures we never hit TPM limits
+                time.sleep(30.0) 
         except Exception as e:
-            indexing_logger.error(f"Error processing batch {i}: {e}")
-            # simple retry with backoff
-            indexing_logger.info("Retrying in 30s...")
-            time.sleep(30)
-            vectordb.add_documents(batch)
+            error_str = str(e)
+            indexing_logger.error(f"Error processing batch starting at index {i}: {error_str}")
+            
+            # Check for Daily Quota exhaustion (RPD)
+            if "EmbedContentRequestsPerDay" in error_str or "limit: 1000" in error_str:
+                indexing_logger.critical("EXCEEDED DAILY GOOGLE API QUOTA (1,000 requests). Stopping indexer.")
+                print("\nCRITICAL: Daily Google API Limit reached (1,000 requests).")
+                print("The quota resets at midnight Pacific Time. Incremental indexing will resume tomorrow.")
+                return vectordb
+
+            # Robust retry for transient errors or TPM/RPM spikes
+            wait_time = 180 
+            if "RESOURCE_EXHAUSTED" in error_str:
+                indexing_logger.info(f"Rate limit exhausted. Cooling down for {wait_time}s...")
+            else:
+                indexing_logger.info(f"Unexpected error. Cooling down for {wait_time}s...")
+            
+            time.sleep(wait_time)
+            try:
+                vectordb.add_documents(batch)
+            except Exception as e2:
+                indexing_logger.error(f"Second attempt failed: {e2}. Skipping batch.")
 
     vectordb.persist()
     indexing_logger.info("Indexing complete!")
