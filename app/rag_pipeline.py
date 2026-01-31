@@ -1,5 +1,6 @@
 # app/rag_pipeline.py
 import os
+import re
 from typing import List
 
 from app.config import settings
@@ -74,6 +75,31 @@ def make_embedder():
     )
 
 
+
+def preprocess_code(content: str, ext: str) -> str:
+    """Strips comments and noise based on file extension."""
+    if ext in {".java", ".xml", ".xsd", ".config", ".yml", ".yaml"}:
+        # Strip block comments /* ... */ or <!-- ... -->
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
+        # Strip single line // (but NOT if it's like https://)
+        if ext == ".java":
+             # Match // only if not preceded by :
+             content = re.sub(r'(?<!:)//.*', '', content)
+        if ext in {".yml", ".yaml", ".properties"}:
+             content = re.sub(r'#.*', '', content)
+    elif ext == ".py":
+        # Strip triple quotes
+        content = re.sub(r'"{3}.*?"{3}', '', content, flags=re.DOTALL)
+        content = re.sub(r"'{3}.*?'{3}", '', content, flags=re.DOTALL)
+        # Strip # comments
+        content = re.sub(r'#.*', '', content)
+    
+    # Strip excessive whitespace
+    content = "\n".join(line for line in content.splitlines() if line.strip())
+    return content
+
+
 def load_documents(data_dir: str) -> List[Document]:
     """
     Implements recursive project discovery. 
@@ -124,6 +150,9 @@ def load_documents(data_dir: str) -> List[Document]:
                         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                             content = f.read()
                             if content.strip():
+                                # Normalize extension for preprocessor (e.g. pom.xml -> xml)
+                                proc_ext = ext if ext else (".xml" if is_pom else "")
+                                content = preprocess_code(content, proc_ext)
                                 all_docs.append(Document(
                                     page_content=content,
                                     metadata={
@@ -153,10 +182,19 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
         chunk_overlap=150,
     )
 
+    python_splitter = RecursiveCharacterTextSplitter.from_language(
+        language=Language.PYTHON,
+        chunk_size=1000,
+        chunk_overlap=150,
+    )
+
     split_docs = []
     for doc in docs:
-        if doc.metadata.get("extension") == ".java":
+        ext = doc.metadata.get("extension")
+        if ext == ".java":
             split_docs.extend(java_splitter.split_documents([doc]))
+        elif ext == ".py":
+            split_docs.extend(python_splitter.split_documents([doc]))
         else:
             split_docs.extend(default_splitter.split_documents([doc]))
             
@@ -164,9 +202,9 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
 
 
 def build_vector_store() -> Chroma:
-    docs = load_documents(settings.data_dir)
+    docs = load_documents(settings.resolved_data_dir)
     if not docs:
-        indexing_logger.warning(f"No documents found in {settings.data_dir}")
+        indexing_logger.warning(f"No documents found in {settings.resolved_data_dir}")
         raise SystemExit(0)
 
     embeddings = make_embedder()
@@ -210,7 +248,8 @@ def build_vector_store() -> Chroma:
     # 1100 chunks = 22 requests (well under the 1000 daily limit)
     # To maximize the 1,000 daily requests (RPD), we use a larger batch size.
     # 45 chunks stays safely under the 20,480 token per-request size limit.
-    batch_size = 45
+    # Increase batch size to 100 for better efficiency (roughly 25k tokens per request)
+    batch_size = 100
     import time
 
     indexing_logger.info(f"Adding documents in batches of {batch_size} (saves daily quota)...")
@@ -221,8 +260,8 @@ def build_vector_store() -> Chroma:
             indexing_logger.info(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
             
             if settings.embedding_provider == "google":
-                # 30s delay ensures we never hit TPM limits
-                time.sleep(30.0) 
+                # 4.1s delay allows ~14.6 RPM, staying just under the 15 RPM Free Tier limit
+                time.sleep(4.1) 
         except Exception as e:
             error_str = str(e)
             indexing_logger.error(f"Error processing batch starting at index {i}: {error_str}")

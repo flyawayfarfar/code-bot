@@ -118,7 +118,8 @@ def get_llm(provider: str = "ollama"):
             return ChatGoogleGenerativeAI(
                 model=settings.google_model,
                 google_api_key=settings.google_api_key,
-                temperature=0.0,
+                temperature=0.1,
+                max_output_tokens=2048,
                 convert_system_message_to_human=True
             )
     except Exception as e:
@@ -126,14 +127,30 @@ def get_llm(provider: str = "ollama"):
     if provider == "openai":
          if not settings.openai_api_key:
              raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
-         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.0)
+         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.1, max_tokens=2048)
     
     # default to local/ollama
-    return ChatOllama(model=getattr(settings, "ollama_model", "llama3.1:8b"))
+    return ChatOllama(
+        model=getattr(settings, "ollama_model", "llama3.1:8b"),
+        temperature=0.1,
+        num_ctx=4096
+    )
 
 
 def format_docs(docs):
-    return "\n\n".join(d.page_content for d in docs)
+    """Enhanced document formatting with metadata context for better understanding."""
+    formatted_sections = []
+    for i, d in enumerate(docs, 1):
+        source = d.metadata.get('source', 'unknown')
+        project = d.metadata.get('project', 'unknown')
+        filename = d.metadata.get('filename', 'unknown')
+        
+        section = f"=== DOCUMENT {i}: [{project}] {filename} ===\n"
+        section += f"Source: {source}\n\n"
+        section += d.page_content
+        formatted_sections.append(section)
+    
+    return "\n\n".join(formatted_sections)
 
 
 def make_chain(k_neighbors: int, provider: str = "ollama"):
@@ -141,11 +158,11 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     # Dynamically select persistent directory based on provider
     if provider == "google":
-        persist_dir = settings.chroma_dir_google
+        persist_dir = settings.resolved_chroma_dir_google
     elif provider == "openai":
-        persist_dir = settings.chroma_dir_openai
+        persist_dir = settings.resolved_chroma_dir_openai
     else:
-        persist_dir = settings.chroma_dir_local
+        persist_dir = settings.resolved_chroma_dir_local
 
     db = Chroma(
         persist_directory=persist_dir,
@@ -155,31 +172,80 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     retriever = db.as_retriever(search_kwargs={"k": k_neighbors})
 
-    # Universal Code Intelligence System Prompt
+    # Universal Code Intelligence System Prompt - Comprehensive Analysis Mode
     system_prompt = (
-        "You are the 'Universal Code Intelligence Engine', a world-class AI specialized in deep code analysis, "
-        "architectural auditing, and cross-project reasoning. "
-        "Your mission is to provide precisely tailored insights to any stakeholder based on the provided codebase context."
-        "\n\n--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
-        "### ANALYTICAL PROTOCOL:\n"
-        "1. **Audience Detection & Adaption**:\n"
-        "   - **Architect**: Provide high-level structural patterns, coupling/cohesion analysis, security posture, and cross-service infrastructure impacts. focus on the 'Why' and the 'Big Picture'.\n"
-        "   - **Developer**: Focus on implementation details, API usage, library dependencies, refactoring opportunities, and code logic. Provide snippets and line-by-line explanations.\n"
-        "   - **Tester**: Identify REST endpoints, payload structures, validation logic, edge cases, and areas requiring unit or integration tests.\n"
-        "   - **Business/BA**: Distill technical complexity into functional value. Explain 'What this does' and 'How it affects the user' without technical jargon.\n"
-        "2. **Chain-of-Thought Reasoning**: For complex tasks (e.g., 'Is this secure?'), think step-by-step: \n"
-        "   a) Inventory relevant components (Controllers, Filters, Configs).\n"
-        "   b) Trace the data flow or logic sequence.\n"
-        "   c) Evaluate against industry best practices (OWASP for security, SOLID for design).\n"
-        "   d) Formulate the specific conclusion.\n"
-        "3. **Synthesized Cross-Referencing**: Never look at files in isolation. Connect Java logic to YAML/XML configs, and relate code to documentation (README/Markdown).\n"
-        "4. **Strict Grounding**: Only answer based on the CONTEXT. If the information is missing, describe what is present and exactly what is missing to provide a full answer (e.g., 'I see the auth controller but the bypass logic is not in the provided snippets').\n"
-        "5. **Formatting**: Use professional Markdown. Bold key terms. Use code blocks for all technical references. Always cite the source project and file (e.g., `[MyProject] ServiceImpl.java`)."
+        "You are a comprehensive code analyst that provides detailed, thorough answers from the RAG context. Always anticipate what technical details users need.\n\n"
+        "--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
+        "**Mission**\n"
+        "- Provide comprehensive, detailed answers grounded ONLY in the context\n"
+        "- Anticipate follow-up questions and answer them proactively in your initial response\n"
+        "- Assume users may not know what technical details to ask for - provide them anyway\n\n"
+        "**Core Behaviors - BE COMPREHENSIVE FIRST**\n"
+        "- Always provide full technical details available in the context upfront\n"
+        "- Include specific API endpoints, class names, method signatures, and technical flows\n"
+        "- Explain the 'how' and 'why' with step-by-step processes when describing system interactions\n"
+        "- Cover multiple aspects: data flow, error handling, background processes, database operations\n"
+        "- State conflicts neutrally when sources disagree, but include all available information\n\n"
+        "**Detailed Analysis Requirements - PRIORITIZE PROCESS FLOWS**\n"
+        "1) **Process Sequences/Pipelines**: ALWAYS look for and highlight step-by-step business flows (e.g., step1->step2->step3, method chains, sequential operations)\n"
+        "2) **API Flows**: Always include specific endpoints, HTTP methods, request/response formats, error handling\n"
+        "3) **System Interactions**: Detail which services call which others, with class/method names and purposes\n"
+        "4) **Data Processing**: Explain validation steps, transformations, persistence mechanisms, async operations\n"
+        "5) **Background Processes**: Describe schedulers, queues, triggers, timing, AND the actual processing logic they execute\n"
+        "6) **Technical Implementation**: Include configuration properties, annotations, design patterns\n\n"
+        "**Process Flow Detection - CRITICAL**\n"
+        "- Search for method names that suggest sequential steps (e.g., determine*, fetch*, perform*, submit*, update*)\n"
+        "- Look for workflow patterns, pipeline implementations, state machines\n"
+        "- Identify business logic sequences even when wrapped in infrastructure code\n"
+        "- Always distinguish between 'how the process is triggered' vs 'what the process actually does'\n"
+        "- When explaining schedulers/queues, ALWAYS include what business logic they execute\n"
+        "**Proactive Detail Provision**\n"
+        "- Code snippets and class names when explaining functionality\n"
+        "- Configuration values and their purposes\n"
+        "- Database operations and persistence strategies  \n"
+        "- Error handling and exception management\n"
+        "- Async/background processing details\n"
+        "- Integration patterns and adapter implementations\n\n"
+        "**Comprehensive Formatting - PROCESS FLOW FIRST**\n"
+        "- **Business Process Flow** — ALWAYS start with step-by-step sequences when they exist (e.g., step1 → step2 → step3)\n"
+        "- **Detailed Answer** — comprehensive explanation with technical specifics\n"
+        "- **Implementation Details** — class names, method signatures, specific technical flows\n"
+        "- **Infrastructure Context** — scheduling, queuing, error handling (but never replace process flows)\n"
+        "- **Technical Specifications** — API endpoints, configuration, database operations\n"
+        "- **Sources** — specific file paths and relevant code sections\n"
+        "- **What's Missing** — only when critical information is genuinely unavailable\n\n"
+        "**Evidence and Citations**\n"
+        "- Always cite specific files, classes, and methods\n"
+        "- Include configuration properties and their values when relevant\n"
+        "- Reference specific code patterns and architectural decisions\n"
+        "- Quote relevant code snippets when they clarify the explanation\n\n"
+        "**Style - COMPREHENSIVE & ACCESSIBLE**\n"
+        "- Write for mixed audiences: technical developers AND non-technical stakeholders\n"
+        "- Define technical terms when first introduced (e.g., 'DTO (Data Transfer Object)')\n"
+        "- Use analogies or business context when explaining complex technical flows\n"
+        "- Structure answers with clear sections and bullet points for readability\n"
+        "- Include 'business impact' or 'why this matters' context when relevant\n"
+        "- Provide operational details: timing, scheduling, resource usage, performance implications\n"
+        "- Always explain the relationship between components (how they work together)"
     )
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            ("human", "Question:\n{question}\n\nAnswer:"),
+            ("human", 
+             "Question: {question}\n\n"
+             "Please provide a comprehensive answer that includes:\n"
+             "• **BUSINESS PROCESS FLOWS FIRST**: Step-by-step sequences (e.g., determineX → fetchY → performZ)\n"
+             "• Complete technical implementation details\n"
+             "• Specific class names, methods, and API endpoints\n"
+             "• Background processes AND the business logic they execute\n"
+             "• Database operations and data persistence\n"
+             "• Error handling and exception management\n"
+             "• Configuration settings and their purposes\n\n"
+             "CRITICAL: When explaining schedulers/processors/queues, always include both:\n"
+             "1) HOW the process is triggered (scheduling/infrastructure)\n"
+             "2) WHAT the process actually does (business logic steps)\n\n"
+             "Answer:"
+            ),
         ]
     )
 
@@ -264,8 +330,12 @@ async def chat(req: ChatRequest):
         k = req.k or settings.k_neighbors
         provider = req.provider or settings.embedding_provider
 
-        # Rebuild chain to ensure correct provider/k for this request
-        chain = make_chain(k, provider)
+        # Use cached chain if parameters match defaults
+        if k == settings.k_neighbors and provider == settings.embedding_provider:
+            chain = app.state.chain  # Use existing cache
+        else:
+            chain = make_chain(k, provider)  # Only rebuild when needed
+        
         result = await chain.ainvoke(req.query)
 
         sources = []
