@@ -15,3 +15,16 @@ env/
 /localRagChatbot.zip
 /local_rag_chatbot_github.zip
 /readme.txt
+/chroma_db_ollama/chroma.sqlite3
+/chroma_googleai/41dce99a-89ea-4b03-ad08-63d36a8b8b83/data_level0.bin
+/chroma_googleai/41dce99a-89ea-4b03-ad08-63d36a8b8b83/header.bin
+/chroma_googleai/41dce99a-89ea-4b03-ad08-63d36a8b8b83/index_metadata.pickle
+/chroma_googleai/41dce99a-89ea-4b03-ad08-63d36a8b8b83/length.bin
+/chroma_googleai/41dce99a-89ea-4b03-ad08-63d36a8b8b83/link_lists.bin
+/chroma_googleai/chroma.sqlite3
+/conversations.db
+/indexing.log
+/server.log
+/test_dims.py
+/test_dims_v2.py
+/.vscode/settings.json
