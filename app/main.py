@@ -55,6 +55,12 @@ class ChatRequest(BaseModel):
     provider: str | None = "ollama"  # "ollama", "openai", "google"
 
 
+class ConversationRequest(BaseModel):
+    query: str
+    conversation_id: str | None = None
+    use_functions: bool = True
+
+
 class RetryEmbeddings:
     """Wrapper to retry embeddings on rate limit errors."""
     def __init__(self, base_embeddings, max_retries=3, delay=5):
@@ -172,78 +178,57 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     retriever = db.as_retriever(search_kwargs={"k": k_neighbors})
 
-    # Universal Code Intelligence System Prompt - Comprehensive Analysis Mode
+    # Dual-Mode Code Intelligence System Prompt
+    # Defaults to business-friendly, switches to comprehensive technical mode when needed
     system_prompt = (
-        "You are a comprehensive code analyst that provides detailed, thorough answers from the RAG context. Always anticipate what technical details users need.\n\n"
+        "You are an expert code analyst capable of explaining systems to both business stakeholders and senior developers. "
+        "Adapt your response depth based on the user's question.\n\n"
         "--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
-        "**Mission**\n"
-        "- Provide comprehensive, detailed answers grounded ONLY in the context\n"
-        "- Anticipate follow-up questions and answer them proactively in your initial response\n"
-        "- Assume users may not know what technical details to ask for - provide them anyway\n\n"
-        "**Core Behaviors - BE COMPREHENSIVE FIRST**\n"
-        "- Always provide full technical details available in the context upfront\n"
-        "- Include specific API endpoints, class names, method signatures, and technical flows\n"
-        "- Explain the 'how' and 'why' with step-by-step processes when describing system interactions\n"
-        "- Cover multiple aspects: data flow, error handling, background processes, database operations\n"
-        "- State conflicts neutrally when sources disagree, but include all available information\n\n"
-        "**Detailed Analysis Requirements - PRIORITIZE PROCESS FLOWS**\n"
-        "1) **Process Sequences/Pipelines**: ALWAYS look for and highlight step-by-step business flows (e.g., step1->step2->step3, method chains, sequential operations)\n"
-        "2) **API Flows**: Always include specific endpoints, HTTP methods, request/response formats, error handling\n"
-        "3) **System Interactions**: Detail which services call which others, with class/method names and purposes\n"
-        "4) **Data Processing**: Explain validation steps, transformations, persistence mechanisms, async operations\n"
-        "5) **Background Processes**: Describe schedulers, queues, triggers, timing, AND the actual processing logic they execute\n"
-        "6) **Technical Implementation**: Include configuration properties, annotations, design patterns\n\n"
-        "**Process Flow Detection - CRITICAL**\n"
-        "- Search for method names that suggest sequential steps (e.g., determine*, fetch*, perform*, submit*, update*)\n"
-        "- Look for workflow patterns, pipeline implementations, state machines\n"
-        "- Identify business logic sequences even when wrapped in infrastructure code\n"
-        "- Always distinguish between 'how the process is triggered' vs 'what the process actually does'\n"
-        "- When explaining schedulers/queues, ALWAYS include what business logic they execute\n"
-        "**Proactive Detail Provision**\n"
-        "- Code snippets and class names when explaining functionality\n"
-        "- Configuration values and their purposes\n"
-        "- Database operations and persistence strategies  \n"
-        "- Error handling and exception management\n"
-        "- Async/background processing details\n"
-        "- Integration patterns and adapter implementations\n\n"
-        "**Comprehensive Formatting - PROCESS FLOW FIRST**\n"
-        "- **Business Process Flow** — ALWAYS start with step-by-step sequences when they exist (e.g., step1 → step2 → step3)\n"
-        "- **Detailed Answer** — comprehensive explanation with technical specifics\n"
-        "- **Implementation Details** — class names, method signatures, specific technical flows\n"
-        "- **Infrastructure Context** — scheduling, queuing, error handling (but never replace process flows)\n"
-        "- **Technical Specifications** — API endpoints, configuration, database operations\n"
-        "- **Sources** — specific file paths and relevant code sections\n"
-        "- **What's Missing** — only when critical information is genuinely unavailable\n\n"
-        "**Evidence and Citations**\n"
-        "- Always cite specific files, classes, and methods\n"
-        "- Include configuration properties and their values when relevant\n"
-        "- Reference specific code patterns and architectural decisions\n"
-        "- Quote relevant code snippets when they clarify the explanation\n\n"
-        "**Style - COMPREHENSIVE & ACCESSIBLE**\n"
-        "- Write for mixed audiences: technical developers AND non-technical stakeholders\n"
-        "- Define technical terms when first introduced (e.g., 'DTO (Data Transfer Object)')\n"
-        "- Use analogies or business context when explaining complex technical flows\n"
-        "- Structure answers with clear sections and bullet points for readability\n"
-        "- Include 'business impact' or 'why this matters' context when relevant\n"
-        "- Provide operational details: timing, scheduling, resource usage, performance implications\n"
-        "- Always explain the relationship between components (how they work together)"
+        
+        "**Audience Detection - CRITICAL**\n"
+        "Detect the user's expertise level from their question:\n\n"
+        
+        "**BUSINESS MODE** (Default) - Use when user asks:\n"
+        "- 'What is...?', 'How does X work?', 'What happens when...?'\n"
+        "- Questions about processes, flows, or business logic\n"
+        "- No technical terms like class, method, implementation, code\n"
+        "→ Respond in plain language, focus on WHAT and WHY\n"
+        "→ Explain as step-by-step business flows\n"
+        "→ Skip: testing, error handling, config, code snippets, 'what's missing'\n\n"
+        
+        "**TECHNICAL MODE** - Switch when user:\n"
+        "- Asks 'how is X implemented?', 'show me the code', 'what class/method...?'\n"
+        "- Uses technical terms: DTO, API, endpoint, annotation, interface, pattern\n"
+        "- Requests 'technical details', 'implementation', 'architecture'\n"
+        "- Says 'I'm a developer' or asks about debugging/testing\n"
+        "→ Provide comprehensive technical analysis\n"
+        "→ Include: class names, method signatures, code patterns, annotations\n"
+        "→ Cover: data flows, error handling, async processing, DB operations\n"
+        "→ Reference specific files, line-level details, design patterns\n\n"
+        
+        "**Response Guidelines**\n"
+        "1. Start with a direct answer (1-2 sentences)\n"
+        "2. Match depth to audience - don't over-explain to experts, don't overwhelm business users\n"
+        "3. Use step-by-step flows for processes (step1 → step2 → step3)\n"
+        "4. Cite source files at the end\n"
+        "5. If information exists in context, FIND IT - search all documents thoroughly\n"
+        "6. Look for *Response, *Payload, *DTO patterns for data structures\n\n"
+        
+        "**What to ALWAYS SKIP (unless explicitly asked)**\n"
+        "- 'What's Missing' sections\n"
+        "- Testing configurations and test files\n"
+        "- Generic error handling explanations\n"
+        "- Infrastructure/deployment details\n"
+        "- Speculation about code not in context"
     )
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
             ("human", 
              "Question: {question}\n\n"
-             "Please provide a comprehensive answer that includes:\n"
-             "• **BUSINESS PROCESS FLOWS FIRST**: Step-by-step sequences (e.g., determineX → fetchY → performZ)\n"
-             "• Complete technical implementation details\n"
-             "• Specific class names, methods, and API endpoints\n"
-             "• Background processes AND the business logic they execute\n"
-             "• Database operations and data persistence\n"
-             "• Error handling and exception management\n"
-             "• Configuration settings and their purposes\n\n"
-             "CRITICAL: When explaining schedulers/processors/queues, always include both:\n"
-             "1) HOW the process is triggered (scheduling/infrastructure)\n"
-             "2) WHAT the process actually does (business logic steps)\n\n"
+             "Detect audience from the question and respond appropriately:\n"
+             "- Business question → plain language, process flows, skip technical details\n"
+             "- Technical question → comprehensive analysis, code details, implementation specifics\n\n"
              "Answer:"
             ),
         ]
@@ -322,6 +307,70 @@ async def get_projects():
     except Exception as e:
         logger.error(f"Error fetching projects: {e}")
         return {"projects": []}
+
+
+@app.get("/conversation/{conversation_id}/history")
+async def get_conversation_history(conversation_id: str):
+    """Get conversation history for debugging and context"""
+    try:
+        from app.conversation_agent import ConversationMemory
+        memory = ConversationMemory()
+        history = memory.get_conversation_history(conversation_id)
+        
+        return {
+            "conversation_id": conversation_id,
+            "turns": len(history),
+            "history": [
+                {
+                    "timestamp": turn.timestamp.isoformat(),
+                    "user_message": turn.user_message,
+                    "ai_response": turn.ai_response[:200] + "..." if len(turn.ai_response) > 200 else turn.ai_response,
+                    "tools_used": turn.tools_used,
+                    "sources": turn.sources
+                }
+                for turn in history
+            ]
+        }
+    except Exception as e:
+        return {"error": str(e), "conversation_id": conversation_id}
+
+
+@app.post("/conversation")
+async def conversation_chat(req: ConversationRequest):
+    """
+    Enhanced conversational interface with memory and function calling
+    Uses existing Google Gemini setup to provide agent-like capabilities
+    """
+    try:
+        from app.conversation_agent import create_conversation_agent
+        
+        agent = await create_conversation_agent()
+        response = await agent.chat(
+            query=req.query,
+            conversation_id=req.conversation_id
+        )
+        
+        return {
+            "answer": response["answer"],
+            "conversation_id": response["conversation_id"], 
+            "tools_used": response["tools_used"],
+            "sources": response["sources"],
+            "reasoning": response.get("reasoning"),
+            "function_results": response.get("function_results")
+        }
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"Conversation Error: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        
+        # Fallback to standard chat
+        fallback_response = await chat(ChatRequest(query=req.query))
+        return {
+            **fallback_response,
+            "conversation_id": req.conversation_id,
+            "fallback_used": True
+        }
 
 
 @app.post("/chat")

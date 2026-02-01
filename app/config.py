@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     chroma_dir_local: str = "chroma_db_ollama"
     chroma_dir_openai: str = "chroma_db_openai"
     chroma_dir_google: str = "chroma_googleai"
-    k_neighbors:           int  = 8
+    k_neighbors:           int  = 12  # Increased for better coverage
 
     # Ollama
     ollama_base_url:       str  = "http://localhost:11434"

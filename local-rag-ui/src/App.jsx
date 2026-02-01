@@ -1,226 +1,399 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-// ✨ Modern, centered, responsive chat UI (single-file React)
-// - Clean top nav, generous spacing, and a max-width container so it never hugs the edge
-// - Dark mode toggle, k slider, editable API URL, source chips
-// - Sticky composer, loading shimmer, smooth scroll-to-bottom
-// - Tailwind classes throughout (works fine even without Tailwind, just less styled)
-
-const IconSun = (props) => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+// Icons
+const SendIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
   </svg>
-);
-const IconMoon = (props) => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+)
+
+const SettingsIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
-);
-const IconSend = (props) => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="m22 2-7 20-4-9-9-4 20-7z" />
+)
+
+const BotIcon = () => (
+  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
   </svg>
-);
+)
 
-export default function App() {
-  const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
-  const [provider, setProvider] = useState("google");
-  const [query, setQuery] = useState("");
-  const [k, setK] = useState(3);
-  const displayModel = useMemo(() => {
-    if (provider === "google") return "gemini-2.5-flash-lite";
-    if (provider === "openai") return "gpt-4o-mini";
-    return "llama3.1:8b";
-  }, [provider]);
-  const [messages, setMessages] = useState([]); // {role, text, sources?}
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [dark, setDark] = useState(() => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const [projects, setProjects] = useState([]);
-  const [randomProject, setRandomProject] = useState("");
+const UserIcon = () => (
+  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+  </svg>
+)
 
-  const scrollRef = useRef(null);
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading]);
+const SpinnerIcon = () => (
+  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+  </svg>
+)
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-  }, [dark]);
-
-  useEffect(() => {
-    fetch(`${apiBase}/projects`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.projects && data.projects.length > 0) {
-          setProjects(data.projects);
-          setRandomProject(data.projects[Math.floor(Math.random() * data.projects.length)]);
-        }
-      })
-      .catch(err => console.error("Failed to fetch projects:", err));
-  }, [apiBase]);
-
-  const canAsk = useMemo(() => query.trim().length > 0 && !loading, [query, loading]);
-
-  async function ask() {
-    const q = query.trim();
-    if (!q) return;
-    setError("");
-    setLoading(true);
-    setMessages((m) => [...m, { role: "user", text: q }]);
-    setQuery(""); // Clear immediately so user can type next question
-    try {
-      const res = await fetch(`${apiBase}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, k, provider }),
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = await res.json();
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", text: data.answer || "(no answer)", sources: data.sources || [] },
-      ]);
-    } catch (e) {
-      setError(e.message || String(e));
-      setMessages((m) => [...m, { role: "assistant", text: "Sorry, something went wrong. Check the API." }]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function onKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); }
+// Message component
+function Message({ message, isUser }) {
+  const markdownComponents = {
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '')
+      return !inline && match ? (
+        <SyntaxHighlighter
+          style={oneDark}
+          language={match[1]}
+          PreTag="div"
+          className="rounded-lg my-2 text-sm"
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className="bg-gray-700 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+          {children}
+        </code>
+      )
+    },
+    p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+    ul: ({ children }) => <ul className="list-disc list-inside mb-3 pl-4 space-y-1">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 pl-4 space-y-1">{children}</ol>,
+    li: ({ children }) => <li className="pl-2 break-words">{children}</li>,
+    h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-5">{children}</h1>,
+    h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4">{children}</h2>,
+    h3: ({ children }) => <h3 className="text-lg font-semibold mb-2 mt-3">{children}</h3>,
+    a: ({ children, href }) => (
+      <a href={href} className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-4 border-gray-500 pl-4 italic my-3 text-gray-300">{children}</blockquote>
+    ),
+    table: ({ children }) => (
+      <div className="overflow-x-auto my-3">
+        <table className="min-w-full border border-gray-600 divide-y divide-gray-600">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className="bg-gray-700">{children}</thead>,
+    th: ({ children }) => <th className="border border-gray-600 px-4 py-2 text-left font-semibold">{children}</th>,
+    td: ({ children }) => <td className="border border-gray-600 px-4 py-2">{children}</td>,
   }
 
   return (
-    <div className="min-h-screen text-gray-900 dark:text-gray-100 bg-[radial-gradient(1200px_600px_at_10%_-10%,rgba(59,130,246,0.12),transparent),radial-gradient(800px_400px_at_90%_-20%,rgba(99,102,241,0.12),transparent)] dark:bg-[#0b0f17]">
-      {/* Top nav */}
-      <nav className="sticky top-0 z-10 backdrop-blur bg-white/60 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-800">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600" />
-            <div>
-              <div className="text-lg font-semibold">Local RAG Chat</div>
-              <div className="text-[11px] text-gray-500 dark:text-gray-400">Ollama · Chroma · FastAPI</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5">
-              <span className="text-xs text-gray-500">k</span>
-              <input type="range" min={2} max={6} value={k} onChange={(e) => setK(Number(e.target.value))} className="accent-blue-600" />
-              <span className="text-xs w-6 text-center">{k}</span>
-            </div>
-            <button onClick={() => setDark(d => !d)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40 p-2 hover:shadow-sm">
-              {dark ? <IconSun /> : <IconMoon />}
-            </button>
-          </div>
+    <div className={`flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {!isUser && (
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center self-start">
+          <BotIcon />
         </div>
-      </nav>
-
-      {/* Main container */}
-      <main className="max-w-5xl mx-auto px-6 pt-8 pb-24">
-        {/* Settings bar */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="col-span-2 flex items-center gap-2">
-            <label className="text-xs text-gray-500 dark:text-gray-400">API</label>
-            <input className="flex-1 text-sm px-3 py-2 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="text-sm px-3 py-2 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none"
-            >
-              <option value="ollama">Ollama</option>
-              <option value="openai">OpenAI</option>
-              <option value="google">Google</option>
-            </select>
+      )}
+      <div className={`max-w-[85%] rounded-2xl px-5 py-3.5 ${
+        isUser 
+          ? 'bg-blue-600 text-white' 
+          : 'bg-gray-800 text-gray-100'
+      }`}>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <div className="prose prose-invert max-w-none text-gray-200">
+            <ReactMarkdown components={markdownComponents}>
+              {message.content}
+            </ReactMarkdown>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400">Model</span>
-            <span className="text-xs px-2 py-1 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 truncate">{displayModel}</span>
-          </div>
-        </div>
-
-        {/* Chat card */}
-        <section className="rounded-2xl border border-gray-100 dark:border-gray-800 bg-white/90 dark:bg-gray-900/60 shadow-xl">
-          <div ref={scrollRef} className="max-h-[62vh] overflow-auto p-6 space-y-5">
-            {messages.length === 0 && (
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                Ask about your code. Try: <span className="font-medium text-gray-800 dark:text-gray-200 cursor-pointer hover:underline" onClick={() => setQuery(`What are the REST endpoints in ${randomProject || "your projects"}?`)}>
-                  “What are the REST endpoints in {randomProject || "Project Alpha"}?”
-                </span>
-              </div>
-            )}
-            {messages.map((m, i) => (
-              <Message key={i} role={m.role} text={m.text} sources={m.sources} />
-            ))}
-            {loading && <TypingShimmer />}
-          </div>
-
-          {/* Composer */}
-          <div className="p-4 border-t border-gray-100 dark:border-gray-800">
-            <div className="flex items-end gap-2">
-              <textarea
-                rows={2}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Type your question and press Enter…"
-                className="flex-1 text-sm px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-              <button onClick={ask} disabled={!canAsk} className="h-11 px-5 rounded-xl bg-blue-600 text-white font-medium disabled:opacity-50 hover:shadow-sm flex items-center gap-2">
-                <IconSend /> Ask
-              </button>
-            </div>
-            {error && <div className="text-xs text-red-500 mt-2">{error}</div>}
-          </div>
-        </section>
-
-        <div className="mt-6 text-xs text-gray-500 dark:text-gray-400">Connected to <code>{apiBase}</code>. Ensure FastAPI is running with CORS enabled.</div>
-      </main>
-    </div>
-  );
-}
-
-function Message({ role, text, sources }) {
-  const isUser = role === "user";
-  return (
-    <div className={"flex " + (isUser ? "justify-end" : "justify-start")}>
-      <div className={(isUser ? "bg-gradient-to-br from-blue-600 to-indigo-600 text-white" : "bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-100 dark:border-gray-700") + " max-w-[80ch] rounded-2xl px-4 py-3 shadow-sm"}>
-        <div className="text-[15px] leading-relaxed markdown-content">
-          <ReactMarkdown>{text}</ReactMarkdown>
-        </div>
-        {Array.isArray(sources) && sources.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {sources.map((s, i) => {
-              const parts = s.split(/[\\/]/);
-              const project = parts.length > 1 ? parts[0] : "global";
-              const filename = parts[parts.length - 1];
-              return (
-                <span key={i} title={s} className="text-xs px-2 py-1 rounded-full bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 truncate max-w-[22rem]">
-                  <span className="font-bold opacity-70">[{project}]</span> {filename}
-                </span>
-              );
-            })}
+        )}
+        {message.toolsUsed && message.toolsUsed.length > 0 && (
+          <div className="mt-3 pt-2 border-t border-gray-700 text-xs text-gray-400">
+            <span className="font-medium">Tools used:</span> {message.toolsUsed.join(', ')}
           </div>
         )}
       </div>
+      {isUser && (
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center self-start">
+          <UserIcon />
+        </div>
+      )}
     </div>
-  );
+  )
 }
 
-function TypingShimmer() {
+// Settings Panel
+function SettingsPanel({ settings, onSettingsChange, onClose }) {
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[60ch] rounded-2xl px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
-        <div className="animate-pulse space-y-2">
-          <div className="h-3 w-40 rounded bg-gray-200 dark:bg-gray-700" />
-          <div className="h-3 w-64 rounded bg-gray-200 dark:bg-gray-700" />
-          <div className="h-3 w-52 rounded bg-gray-200 dark:bg-gray-700" />
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-semibold text-white">Settings</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Provider</label>
+            <select
+              value={settings.provider}
+              onChange={(e) => onSettingsChange({ ...settings, provider: e.target.value })}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="google">Google AI</option>
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Ollama</option>
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">API URL</label>
+            <input
+              type="text"
+              value={settings.apiUrl}
+              onChange={(e) => onSettingsChange({ ...settings, apiUrl: e.target.value })}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="http://localhost:8000"
+            />
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="block text-sm font-medium text-gray-300">Conversation Mode</label>
+              <p className="text-xs text-gray-500">Enables memory and context awareness</p>
+            </div>
+            <button
+              onClick={() => onSettingsChange({ ...settings, conversationMode: !settings.conversationMode })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                settings.conversationMode ? 'bg-blue-600' : 'bg-gray-600'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.conversationMode ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  );
+  )
 }
+
+// Main App
+function App() {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [conversationId, setConversationId] = useState(null)
+  const [settings, setSettings] = useState({
+    provider: 'google',
+    apiUrl: 'http://localhost:8000',
+    conversationMode: false
+  })
+  
+  const messagesEndRef = useRef(null)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
+
+    const userMessage = { role: 'user', content: input.trim() }
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
+    setIsLoading(true)
+
+    try {
+      const endpoint = settings.conversationMode ? '/conversation' : '/chat'
+      const body = settings.conversationMode
+        ? { 
+            query: userMessage.content, 
+            conversation_id: conversationId 
+          }
+        : { 
+            query: userMessage.content, 
+            provider: settings.provider 
+          }
+
+      const response = await fetch(`${settings.apiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) throw new Error('Failed to get response')
+
+      const data = await response.json()
+      
+      if (settings.conversationMode && data.conversation_id) {
+        setConversationId(data.conversation_id)
+      }
+
+      const assistantMessage = {
+        role: 'assistant',
+        content: data.answer,
+        toolsUsed: data.tools_used || [],
+        reasoning: data.reasoning
+      }
+      setMessages(prev => [...prev, assistantMessage])
+    } catch (error) {
+      console.error('Error:', error)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sorry, something went wrong. Please check your connection and try again.'
+      }])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleNewChat = () => {
+    setMessages([])
+    setConversationId(null)
+    inputRef.current?.focus()
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex flex-col">
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 px-4 py-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+              <BotIcon />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-white">Code Assistant</h1>
+              {settings.conversationMode && conversationId && (
+                <p className="text-xs text-gray-400">Session active</p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Mode Toggle */}
+            <div className="flex items-center bg-gray-700 rounded-lg p-0.5">
+              <button
+                onClick={() => setSettings(s => ({ ...s, conversationMode: false }))}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  !settings.conversationMode 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Basic
+              </button>
+              <button
+                onClick={() => setSettings(s => ({ ...s, conversationMode: true }))}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  settings.conversationMode 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Agent
+              </button>
+            </div>
+            <button
+              onClick={handleNewChat}
+              className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              New Chat
+            </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="Settings"
+            >
+              <SettingsIcon />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Messages */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-4 py-6">
+          {messages.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                <BotIcon />
+              </div>
+              <h2 className="text-xl font-semibold text-white mb-2">How can I help you today?</h2>
+              <p className="text-gray-400 max-w-md mx-auto">
+                Ask me anything about your codebase. I'll search through your documents and provide helpful answers.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((msg, idx) => (
+                <Message key={idx} message={msg} isUser={msg.role === 'user'} />
+              ))}
+              {isLoading && (
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                    <BotIcon />
+                  </div>
+                  <div className="bg-gray-800 rounded-2xl px-4 py-3 flex items-center gap-2 text-gray-400">
+                    <SpinnerIcon />
+                    <span>Thinking...</span>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Input */}
+      <footer className="bg-gray-800 border-t border-gray-700 px-4 py-4">
+        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+          <div className="flex gap-3">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask about your codebase..."
+              disabled={isLoading}
+              className="flex-1 bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-colors flex items-center gap-2"
+            >
+              {isLoading ? <SpinnerIcon /> : <SendIcon />}
+              <span className="hidden sm:inline">Send</span>
+            </button>
+          </div>
+          <div className="mt-2 flex items-center justify-center gap-4 text-xs text-gray-500">
+            <span>Provider: {settings.provider}</span>
+            <span>•</span>
+            <span>{settings.conversationMode ? 'Conversation mode' : 'Single query mode'}</span>
+          </div>
+        </form>
+      </footer>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+export default App
