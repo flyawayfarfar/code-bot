@@ -55,6 +55,12 @@ class ChatRequest(BaseModel):
     provider: str | None = "ollama"  # "ollama", "openai", "google"
 
 
+class ConversationRequest(BaseModel):
+    query: str
+    conversation_id: str | None = None
+    use_functions: bool = True
+
+
 class RetryEmbeddings:
     """Wrapper to retry embeddings on rate limit errors."""
     def __init__(self, base_embeddings, max_retries=3, delay=5):
@@ -118,7 +124,8 @@ def get_llm(provider: str = "ollama"):
             return ChatGoogleGenerativeAI(
                 model=settings.google_model,
                 google_api_key=settings.google_api_key,
-                temperature=0.0,
+                temperature=0.1,
+                max_output_tokens=2048,
                 convert_system_message_to_human=True
             )
     except Exception as e:
@@ -126,14 +133,30 @@ def get_llm(provider: str = "ollama"):
     if provider == "openai":
          if not settings.openai_api_key:
              raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
-         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.0)
+         return ChatOpenAI(openai_api_key=settings.openai_api_key, temperature=0.1, max_tokens=2048)
     
     # default to local/ollama
-    return ChatOllama(model=getattr(settings, "ollama_model", "llama3.1:8b"))
+    return ChatOllama(
+        model=getattr(settings, "ollama_model", "llama3.1:8b"),
+        temperature=0.1,
+        num_ctx=4096
+    )
 
 
 def format_docs(docs):
-    return "\n\n".join(d.page_content for d in docs)
+    """Enhanced document formatting with metadata context for better understanding."""
+    formatted_sections = []
+    for i, d in enumerate(docs, 1):
+        source = d.metadata.get('source', 'unknown')
+        project = d.metadata.get('project', 'unknown')
+        filename = d.metadata.get('filename', 'unknown')
+        
+        section = f"=== DOCUMENT {i}: [{project}] {filename} ===\n"
+        section += f"Source: {source}\n\n"
+        section += d.page_content
+        formatted_sections.append(section)
+    
+    return "\n\n".join(formatted_sections)
 
 
 def make_chain(k_neighbors: int, provider: str = "ollama"):
@@ -141,11 +164,11 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     # Dynamically select persistent directory based on provider
     if provider == "google":
-        persist_dir = settings.chroma_dir_google
+        persist_dir = settings.resolved_chroma_dir_google
     elif provider == "openai":
-        persist_dir = settings.chroma_dir_openai
+        persist_dir = settings.resolved_chroma_dir_openai
     else:
-        persist_dir = settings.chroma_dir_local
+        persist_dir = settings.resolved_chroma_dir_local
 
     db = Chroma(
         persist_directory=persist_dir,
@@ -155,31 +178,59 @@ def make_chain(k_neighbors: int, provider: str = "ollama"):
 
     retriever = db.as_retriever(search_kwargs={"k": k_neighbors})
 
-    # Universal Code Intelligence System Prompt
+    # Dual-Mode Code Intelligence System Prompt
+    # Defaults to business-friendly, switches to comprehensive technical mode when needed
     system_prompt = (
-        "You are the 'Universal Code Intelligence Engine', a world-class AI specialized in deep code analysis, "
-        "architectural auditing, and cross-project reasoning. "
-        "Your mission is to provide precisely tailored insights to any stakeholder based on the provided codebase context."
-        "\n\n--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
-        "### ANALYTICAL PROTOCOL:\n"
-        "1. **Audience Detection & Adaption**:\n"
-        "   - **Architect**: Provide high-level structural patterns, coupling/cohesion analysis, security posture, and cross-service infrastructure impacts. focus on the 'Why' and the 'Big Picture'.\n"
-        "   - **Developer**: Focus on implementation details, API usage, library dependencies, refactoring opportunities, and code logic. Provide snippets and line-by-line explanations.\n"
-        "   - **Tester**: Identify REST endpoints, payload structures, validation logic, edge cases, and areas requiring unit or integration tests.\n"
-        "   - **Business/BA**: Distill technical complexity into functional value. Explain 'What this does' and 'How it affects the user' without technical jargon.\n"
-        "2. **Chain-of-Thought Reasoning**: For complex tasks (e.g., 'Is this secure?'), think step-by-step: \n"
-        "   a) Inventory relevant components (Controllers, Filters, Configs).\n"
-        "   b) Trace the data flow or logic sequence.\n"
-        "   c) Evaluate against industry best practices (OWASP for security, SOLID for design).\n"
-        "   d) Formulate the specific conclusion.\n"
-        "3. **Synthesized Cross-Referencing**: Never look at files in isolation. Connect Java logic to YAML/XML configs, and relate code to documentation (README/Markdown).\n"
-        "4. **Strict Grounding**: Only answer based on the CONTEXT. If the information is missing, describe what is present and exactly what is missing to provide a full answer (e.g., 'I see the auth controller but the bypass logic is not in the provided snippets').\n"
-        "5. **Formatting**: Use professional Markdown. Bold key terms. Use code blocks for all technical references. Always cite the source project and file (e.g., `[MyProject] ServiceImpl.java`)."
+        "You are an expert code analyst capable of explaining systems to both business stakeholders and senior developers. "
+        "Adapt your response depth based on the user's question.\n\n"
+        "--- CONTEXT START ---\n{context}\n--- CONTEXT END ---\n\n"
+        
+        "**Audience Detection - CRITICAL**\n"
+        "Detect the user's expertise level from their question:\n\n"
+        
+        "**BUSINESS MODE** (Default) - Use when user asks:\n"
+        "- 'What is...?', 'How does X work?', 'What happens when...?'\n"
+        "- Questions about processes, flows, or business logic\n"
+        "- No technical terms like class, method, implementation, code\n"
+        "→ Respond in plain language, focus on WHAT and WHY\n"
+        "→ Explain as step-by-step business flows\n"
+        "→ Skip: testing, error handling, config, code snippets, 'what's missing'\n\n"
+        
+        "**TECHNICAL MODE** - Switch when user:\n"
+        "- Asks 'how is X implemented?', 'show me the code', 'what class/method...?'\n"
+        "- Uses technical terms: DTO, API, endpoint, annotation, interface, pattern\n"
+        "- Requests 'technical details', 'implementation', 'architecture'\n"
+        "- Says 'I'm a developer' or asks about debugging/testing\n"
+        "→ Provide comprehensive technical analysis\n"
+        "→ Include: class names, method signatures, code patterns, annotations\n"
+        "→ Cover: data flows, error handling, async processing, DB operations\n"
+        "→ Reference specific files, line-level details, design patterns\n\n"
+        
+        "**Response Guidelines**\n"
+        "1. Start with a direct answer (1-2 sentences)\n"
+        "2. Match depth to audience - don't over-explain to experts, don't overwhelm business users\n"
+        "3. Use step-by-step flows for processes (step1 → step2 → step3)\n"
+        "4. Cite source files at the end\n"
+        "5. If information exists in context, FIND IT - search all documents thoroughly\n"
+        "6. Look for *Response, *Payload, *DTO patterns for data structures\n\n"
+        
+        "**What to ALWAYS SKIP (unless explicitly asked)**\n"
+        "- 'What's Missing' sections\n"
+        "- Testing configurations and test files\n"
+        "- Generic error handling explanations\n"
+        "- Infrastructure/deployment details\n"
+        "- Speculation about code not in context"
     )
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            ("human", "Question:\n{question}\n\nAnswer:"),
+            ("human", 
+             "Question: {question}\n\n"
+             "Detect audience from the question and respond appropriately:\n"
+             "- Business question → plain language, process flows, skip technical details\n"
+             "- Technical question → comprehensive analysis, code details, implementation specifics\n\n"
+             "Answer:"
+            ),
         ]
     )
 
@@ -258,14 +309,82 @@ async def get_projects():
         return {"projects": []}
 
 
+@app.get("/conversation/{conversation_id}/history")
+async def get_conversation_history(conversation_id: str):
+    """Get conversation history for debugging and context"""
+    try:
+        from app.conversation_agent import ConversationMemory
+        memory = ConversationMemory()
+        history = memory.get_conversation_history(conversation_id)
+        
+        return {
+            "conversation_id": conversation_id,
+            "turns": len(history),
+            "history": [
+                {
+                    "timestamp": turn.timestamp.isoformat(),
+                    "user_message": turn.user_message,
+                    "ai_response": turn.ai_response[:200] + "..." if len(turn.ai_response) > 200 else turn.ai_response,
+                    "tools_used": turn.tools_used,
+                    "sources": turn.sources
+                }
+                for turn in history
+            ]
+        }
+    except Exception as e:
+        return {"error": str(e), "conversation_id": conversation_id}
+
+
+@app.post("/conversation")
+async def conversation_chat(req: ConversationRequest):
+    """
+    Enhanced conversational interface with memory and function calling
+    Uses existing Google Gemini setup to provide agent-like capabilities
+    """
+    try:
+        from app.conversation_agent import create_conversation_agent
+        
+        agent = await create_conversation_agent()
+        response = await agent.chat(
+            query=req.query,
+            conversation_id=req.conversation_id
+        )
+        
+        return {
+            "answer": response["answer"],
+            "conversation_id": response["conversation_id"], 
+            "tools_used": response["tools_used"],
+            "sources": response["sources"],
+            "reasoning": response.get("reasoning"),
+            "function_results": response.get("function_results")
+        }
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"Conversation Error: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        
+        # Fallback to standard chat
+        fallback_response = await chat(ChatRequest(query=req.query))
+        return {
+            **fallback_response,
+            "conversation_id": req.conversation_id,
+            "fallback_used": True
+        }
+
+
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
         k = req.k or settings.k_neighbors
         provider = req.provider or settings.embedding_provider
 
-        # Rebuild chain to ensure correct provider/k for this request
-        chain = make_chain(k, provider)
+        # Use cached chain if parameters match defaults
+        if k == settings.k_neighbors and provider == settings.embedding_provider:
+            chain = app.state.chain  # Use existing cache
+        else:
+            chain = make_chain(k, provider)  # Only rebuild when needed
+        
         result = await chain.ainvoke(req.query)
 
         sources = []

@@ -18,3 +18,7 @@ sentence-transformers
 aiohttp>=3.13.3
 pypdf
 requests
+
+# Future Google Agent SDK dependencies (when available)
+# google-ai-agents
+# google-ai-generativelanguage

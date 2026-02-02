@@ -1,5 +1,6 @@
 # app/rag_pipeline.py
 import os
+import re
 from typing import List
 
 from app.config import settings
@@ -74,6 +75,31 @@ def make_embedder():
     )
 
 
+
+def preprocess_code(content: str, ext: str) -> str:
+    """Strips comments and noise based on file extension."""
+    if ext in {".java", ".xml", ".xsd", ".config", ".yml", ".yaml"}:
+        # Strip block comments /* ... */ or <!-- ... -->
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
+        # Strip single line // (but NOT if it's like https://)
+        if ext == ".java":
+             # Match // only if not preceded by :
+             content = re.sub(r'(?<!:)//.*', '', content)
+        if ext in {".yml", ".yaml", ".properties"}:
+             content = re.sub(r'#.*', '', content)
+    elif ext == ".py":
+        # Strip triple quotes
+        content = re.sub(r'"{3}.*?"{3}', '', content, flags=re.DOTALL)
+        content = re.sub(r"'{3}.*?'{3}", '', content, flags=re.DOTALL)
+        # Strip # comments
+        content = re.sub(r'#.*', '', content)
+    
+    # Strip excessive whitespace
+    content = "\n".join(line for line in content.splitlines() if line.strip())
+    return content
+
+
 def load_documents(data_dir: str) -> List[Document]:
     """
     Implements recursive project discovery. 
@@ -124,6 +150,9 @@ def load_documents(data_dir: str) -> List[Document]:
                         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                             content = f.read()
                             if content.strip():
+                                # Normalize extension for preprocessor (e.g. pom.xml -> xml)
+                                proc_ext = ext if ext else (".xml" if is_pom else "")
+                                content = preprocess_code(content, proc_ext)
                                 all_docs.append(Document(
                                     page_content=content,
                                     metadata={
@@ -153,10 +182,19 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
         chunk_overlap=150,
     )
 
+    python_splitter = RecursiveCharacterTextSplitter.from_language(
+        language=Language.PYTHON,
+        chunk_size=1000,
+        chunk_overlap=150,
+    )
+
     split_docs = []
     for doc in docs:
-        if doc.metadata.get("extension") == ".java":
+        ext = doc.metadata.get("extension")
+        if ext == ".java":
             split_docs.extend(java_splitter.split_documents([doc]))
+        elif ext == ".py":
+            split_docs.extend(python_splitter.split_documents([doc]))
         else:
             split_docs.extend(default_splitter.split_documents([doc]))
             
@@ -164,9 +202,9 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
 
 
 def build_vector_store() -> Chroma:
-    docs = load_documents(settings.data_dir)
+    docs = load_documents(settings.resolved_data_dir)
     if not docs:
-        indexing_logger.warning(f"No documents found in {settings.data_dir}")
+        indexing_logger.warning(f"No documents found in {settings.resolved_data_dir}")
         raise SystemExit(0)
 
     embeddings = make_embedder()
@@ -208,27 +246,45 @@ def build_vector_store() -> Chroma:
     # --- BATCHED PROCESSING ---
     # Batch size of 50 stays safely under the 20,000 tokens-per-request limit
     # 1100 chunks = 22 requests (well under the 1000 daily limit)
-    batch_size = 50
+    # To maximize the 1,000 daily requests (RPD), we use a larger batch size.
+    # 45 chunks stays safely under the 20,480 token per-request size limit.
+    # Increase batch size to 100 for better efficiency (roughly 25k tokens per request)
+    batch_size = 100
     import time
 
-    indexing_logger.info(f"Adding documents in batches of {batch_size} (saves quota)...")
+    indexing_logger.info(f"Adding documents in batches of {batch_size} (saves daily quota)...")
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i : i + batch_size]
         try:
             vectordb.add_documents(batch)
             indexing_logger.info(f"Processed {min(i + batch_size, len(chunks))}/{len(chunks)}")
             
-            # Google Free Tier (embedding-001) has a 30,000 Tokens Per Minute limit.
-            # 50 chunks * ~300 tokens = ~15,000 tokens. 
-            # Waiting 40s ensures we stay under the 30k TPM limit for the next batch.
             if settings.embedding_provider == "google":
-                time.sleep(40.0) 
+                # 4.1s delay allows ~14.6 RPM, staying just under the 15 RPM Free Tier limit
+                time.sleep(4.1) 
         except Exception as e:
-            indexing_logger.error(f"Error processing batch {i}: {e}")
-            # simple retry with backoff
-            indexing_logger.info("Retrying in 30s...")
-            time.sleep(30)
-            vectordb.add_documents(batch)
+            error_str = str(e)
+            indexing_logger.error(f"Error processing batch starting at index {i}: {error_str}")
+            
+            # Check for Daily Quota exhaustion (RPD)
+            if "EmbedContentRequestsPerDay" in error_str or "limit: 1000" in error_str:
+                indexing_logger.critical("EXCEEDED DAILY GOOGLE API QUOTA (1,000 requests). Stopping indexer.")
+                print("\nCRITICAL: Daily Google API Limit reached (1,000 requests).")
+                print("The quota resets at midnight Pacific Time. Incremental indexing will resume tomorrow.")
+                return vectordb
+
+            # Robust retry for transient errors or TPM/RPM spikes
+            wait_time = 180 
+            if "RESOURCE_EXHAUSTED" in error_str:
+                indexing_logger.info(f"Rate limit exhausted. Cooling down for {wait_time}s...")
+            else:
+                indexing_logger.info(f"Unexpected error. Cooling down for {wait_time}s...")
+            
+            time.sleep(wait_time)
+            try:
+                vectordb.add_documents(batch)
+            except Exception as e2:
+                indexing_logger.error(f"Second attempt failed: {e2}. Skipping batch.")
 
     vectordb.persist()
     indexing_logger.info("Indexing complete!")
