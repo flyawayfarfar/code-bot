@@ -146,13 +146,10 @@ def get_llm(provider: str = "ollama"):
 def format_docs(docs):
     """Enhanced document formatting with metadata context for better understanding."""
     formatted_sections = []
-    for i, d in enumerate(docs, 1):
+    for d in docs:
         source = d.metadata.get('source', 'unknown')
-        project = d.metadata.get('project', 'unknown')
-        filename = d.metadata.get('filename', 'unknown')
         
-        section = f"=== DOCUMENT {i}: [{project}] {filename} ===\n"
-        section += f"Source: {source}\n\n"
+        section = f"Source: {source}\n\n"
         section += d.page_content
         formatted_sections.append(section)
     
