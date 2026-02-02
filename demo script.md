@@ -1,4 +1,4 @@
-# 🎥 CodeBot – 3-Minute Hackathon Pitch Script
+# 🎥 CodeBot – Hackathon Demo Script
 
 ## 0:00–0:30 — Opening: the real problem
 
@@ -31,19 +31,19 @@
 
 ---
 
-## 1:20–2:20 — Demo: cross-project lending flow (main showcase)
+## 1:20–2:20 — Demo: cross-project understanding (main showcase)
 
-> Let’s look at a real example using our lending systems.
+> Let me show you how this works with our indexed codebase.
 
-> When a third-party submits a request to the Lending Gateway, what actually happens inside our platform?
+> *"How do these services connect together?"*
 
-*(Demo runs)*
+*(Demo runs - showing live query and response)*
 
-> CodeBot identifies the entry endpoint in Lending Gateway, follows the service logic, and traces the call into Lending Apply.
+> CodeBot searches through multiple projects and shows how they're actually connected — what APIs they call, what data structures they share, and where the integration points are.
 
-> What’s important here isn’t just the explanation — it’s that CodeBot understands how multiple projects work together, not just a single repository.
+> This isn't just documentation — it's reading the actual code and understanding the relationships between different parts of the system.
 
-> Instead of jumping between codebases, we get the full end-to-end picture in one place, with references to the actual classes and methods.
+> Instead of hunting through repositories, you get the full picture with references to the exact files and methods.
 
 ---
 
@@ -57,74 +57,43 @@
 
 ---
 
-## 2:45–3:15 — Trust, risk, and hallucination (explicit)
+## 2:45–3:15 — Security & deployment (technical approach)
 
-> A natural question with any AI system is trust.
+> We built this as a RAG system using vector embeddings and semantic search.
 
-> CodeBot runs locally and answers questions using retrieved code fragments, not free-form guessing.
+> For production banks, we offer fully local deployment with Ollama — complete air-gapped operation with no external API calls.
 
-> Answers are grounded in the code and can point to exact files and methods, so users can verify them directly in their IDE.
+> For development environments, cloud deployment with Google AI or OpenAI works well, though this does involve bulk indexing your codebase for embedding generation.
 
-> If stricter requirements apply, the same architecture can run with fully local models.
+> The vector database and knowledge base always stay on your infrastructure, giving you complete control over your data.
 
----
-
-## 3:15–3:45 — Current limitations (honest and controlled)
-
-> This is an MVP, and there are clear limitations today.
-
-> At the moment, users may need to guide the response — for example, whether they want an architectural overview or a technical deep dive.
-
-> We’ve focused on two related projects to demonstrate cross-project understanding, and we still need to validate performance with much larger repositories.
-
-> Response accuracy and depth will continue to improve through better retrieval strategies and prompt configuration.
 
 ---
 
-## 3:45–4:20 — Verification & future confidence improvements
+## 3:15–3:30 — What's next
 
-> Today, answers can be verified in two ways:  
-> by asking CodeBot to show the code locations, and by opening the code directly in the IDE.
+> This is an MVP focused on proving the core concept.
 
-> A possible future enhancement is a secondary verifier agent that checks whether answers are fully supported by retrieved code and flags uncertainty.
-
-> This would add an extra confidence layer rather than replacing human judgement.
+> The next steps are scaling to larger codebases and adding role-based access controls for production deployment.
 
 ---
 
-## 4:20–4:50 — Access control, scope, and real usage
+## 3:30–3:45 — Why this matters
 
-> Access control and role-based scoping are not implemented yet.
+> Tools like GitHub Copilot help you write code faster.
 
-> Currently, anyone can ask questions within the indexed projects.  
-> For production, role-based access control would ensure teams only see what they’re authorised to see.
+> CodeBot helps you understand existing systems faster.
 
-> A login system could also tailor responses based on team or role, so answers match the audience automatically.
-
----
-
-## 4:50–5:10 — Cost & rollout awareness
-
-> Cost and scalability need to be validated as part of rollout planning.
-
-> Based on early indications, the value gained from faster onboarding, reduced spikes, and better knowledge sharing makes this worth exploring further.
+> Together, they transform how teams work with complex codebases.
 
 ---
 
-## 5:10–5:30 — Positioning vs Copilot (clear differentiation)
+## 3:45–4:00 — Close
 
-> Tools like GitHub Copilot are great for writing code.
+> We've built something that turns your codebase into a searchable knowledge base.
 
-> CodeBot solves a different problem — understanding how systems behave across multiple projects.
+> It's RAG applied to source code, with the flexibility to run locally or in the cloud.
 
-> They complement each other rather than replace each other.
+> This could change how teams onboard, how they understand systems, and how they make changes safely.
 
----
-
-## 5:30–5:45 — Close
-
-> CodeBot turns tribal knowledge into something searchable.
-
-> It helps teams onboard faster, understand systems more clearly, and spend less time searching or asking around.
-
-> That’s what we wanted to demonstrate today.
+> Thanks for watching!

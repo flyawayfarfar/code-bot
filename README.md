@@ -12,37 +12,52 @@ The system is designed specifically for enterprise codebases, with intelligent p
 
 ### Key Capabilities
 
-- **Flow Tracing**: Trace request paths through controllers → filters → services → repositories with DTO/config analysis
-- **Reuse Discovery**: Find existing functions, utilities, and components with purpose and location details
-- **Business Payload Analysis**: Understand response structures and data flows from DTOs/mappers/controllers
-- **Security Assessment**: Analyze authentication, authorization, validation, and security patterns
-- **Multi-Provider Support**: Seamlessly switch between **Ollama** (fully local), **OpenAI**, and **Google AI (Gemini)**
-- **Enterprise-Ready**: Handles complex multi-module projects with Maven/Gradle builds
+- **Natural Language Code Search**: Ask questions about your codebase in plain English and get relevant code snippets and explanations.
+- **Cross-Project Understanding**: Index multiple related projects to find connections and dependencies between them.
+- **Multi-Provider Support**: Seamlessly switch between **Ollama** (fully local), **OpenAI**, and **Google AI (Gemini)** for both embedding and chat.
+- **Language-Aware Parsing**: Intelligently handles Java, Python, XML, and YAML to improve retrieval quality.
+- **Local-First Design**: Built to run entirely on your infrastructure for maximum security and privacy, with local vector storage via ChromaDB.
 
 ## Architecture Overview
 
-The system follows a specialized RAG architecture for code intelligence:
+The system can operate in two modes: a standard RAG pipeline for direct answers (Basic Mode) and a conversational agent for multi-step analysis (Agent Mode).
 
-1.  **Code Ingestion**: Source files (.java, .py, .xml, .yml, pom.xml, etc.) are loaded from project directories, intelligently parsed to remove comments/noise, and chunked using language-aware splitters
-2.  **Vector Storage**: Code embeddings are stored in **ChromaDB** with metadata about project, file type, and location
-3.  **Intelligent Retrieval**: Queries are matched against relevant code segments using semantic similarity (k=5 by default)
-4.  **Code Analysis**: Retrieved code context is analyzed through specialized task routers for flow tracing, component discovery, or security assessment
-5.  **Contextual Response**: Tailored insights are generated based on stakeholder type (developer/architect/business/security)
+### Basic Mode: Standard RAG Pipeline
+
+This mode follows a direct Retrieval-Augmented Generation (RAG) process, ideal for single-turn questions.
+
+1.  **Semantic Retrieval**: The user's query is used to find the most relevant code chunks from the local ChromaDB vector store.
+2.  **Contextual Response**: The retrieved code is passed to the LLM along with the original query to generate a direct answer.
 
 ```mermaid
 graph TD
-    A[Code Query] --> B{Task Router}
-    B --> C[Flow Tracing]
-    B --> D[Reuse Discovery] 
-    B --> E[Business Payload]
-    B --> F[Security Check]
-    C --> G[ChromaDB Search]
-    D --> G
-    E --> G
-    F --> G
-    G --> H[Code Context]
-    H --> I[LLM Analysis]
-    I --> J[Stakeholder-Tailored Response]
+    A[User Query] --> B[Semantic Search in ChromaDB];
+    B --> C[Retrieve Relevant Code Chunks];
+    C --> D{LLM};
+    A --> D;
+    D --> E[Generated Response];
+```
+
+### Agent Mode: Conversational Agent
+
+This mode uses a conversational agent that can use tools to answer more complex, multi-step questions. It maintains conversation history and can break down a query into multiple steps.
+
+1.  **Reasoning Loop**: The agent LLM receives the query and conversation history. It decides whether it can answer directly or needs to use a tool (e.g., `search_codebase`).
+2.  **Tool Execution**: If a tool is needed, the agent executes it (which may involve a semantic search) and feeds the results back into its context.
+3.  **Final Answer**: Once the agent determines it has enough information, it generates the final response.
+
+```mermaid
+graph TD
+    subgraph Agent
+        A[User Query] --> B{Agent LLM};
+        B -- "Needs Tool?" --> C[Execute Tool: search_codebase];
+        C --> D[Tool Output];
+        D --> B;
+        B -- "Has Answer" --> E[Final Response];
+    end
+    subgraph Knowledge Base
+        C --> F[Search ChromaDB];
+    end
 ```
 
 ---
@@ -216,17 +231,18 @@ You must **build the index** for each provider you intend to use, as embeddings 
 ## Example Use Cases
 
 **For Developers:**
-- "Find all methods that handle user authentication"
-- "Show me how payment processing is implemented"  
+- "Find all methods that handle user authentication."
+- "Show me an example of how payment processing is implemented."
 - "What utility functions are available for date formatting?"
+- "Where is the database connection configured in this project?"
 
 **For Architects:**
-- "Analyze the security posture of the authentication system"
-- "What are the dependencies between these microservices?"
-- "Trace the data flow from API to database"
+- "What are the dependencies between these two microservices based on the code?"
+- "Show me the main entry points for the `api-gateway` project."
+- "How does the system handle logging and error reporting?"
 
 **For Business Stakeholders:**
-- "What business logic is implemented in the checkout process?"
-- "How does the system handle customer data privacy?"
-- "What APIs are exposed for third-party integration?"
+- "What parts of the code seem to handle customer data?"
+- "Can you show me the code related to the checkout process?"
+- "Find the configuration for third-party API integrations."
 

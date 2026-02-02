@@ -186,6 +186,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [conversationId, setConversationId] = useState(null)
+  const [indexedProjects, setIndexedProjects] = useState([])
   const [settings, setSettings] = useState({
     provider: 'google',
     apiUrl: 'http://localhost:8000',
@@ -201,7 +202,20 @@ function App() {
 
   useEffect(() => {
     inputRef.current?.focus()
-  }, [])
+    // Fetch indexed projects on startup
+    const fetchProjects = async () => {
+      try {
+        const response = await fetch(`${settings.apiUrl}/projects`);
+        if (response.ok) {
+          const data = await response.json();
+          setIndexedProjects(data.projects || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch projects:", error);
+      }
+    };
+    fetchProjects();
+  }, [settings.apiUrl])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -272,13 +286,21 @@ function App() {
               <BotIcon />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-white">Code Assistant</h1>
-              {settings.conversationMode && conversationId && (
-                <p className="text-xs text-gray-400">Session active</p>
-              )}
+              <h1 className="text-lg font-semibold text-white">Code Bot</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Provider Selector */}
+            <select
+              value={settings.provider}
+              onChange={(e) => setSettings(s => ({ ...s, provider: e.target.value }))}
+              className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-1.5 text-sm text-white focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="google">Google AI</option>
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Ollama</option>
+            </select>
+
             {/* Mode Toggle */}
             <div className="flex items-center bg-gray-700 rounded-lg p-0.5">
               <button
@@ -328,9 +350,21 @@ function App() {
                 <BotIcon />
               </div>
               <h2 className="text-xl font-semibold text-white mb-2">How can I help you today?</h2>
-              <p className="text-gray-400 max-w-md mx-auto">
+              <p className="text-gray-400 max-w-md mx-auto mb-6">
                 Ask me anything about your codebase. I'll search through your documents and provide helpful answers.
               </p>
+              {indexedProjects.length > 0 && (
+                <div className="max-w-md mx-auto text-left">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-2">Available Projects:</h3>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {indexedProjects.map(proj => (
+                      <span key={proj} className="bg-gray-700 text-gray-200 text-xs font-medium px-2.5 py-1 rounded-full">
+                        {proj}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
